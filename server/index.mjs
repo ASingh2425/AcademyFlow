@@ -1,5 +1,6 @@
 import express from 'express'
 import cors from 'cors'
+import { createHmac } from 'crypto'
 import { readData, writeData, generateId } from './store.mjs'
 import { sendVerificationEmail } from './email.mjs'
 
@@ -53,18 +54,33 @@ function sanitizeString(val, maxLen = 512) {
   return val.trim().slice(0, maxLen)
 }
 
-// ─── Admin Auth ───────────────────────────────────────────────────────────────
+// ─── Admin Auth (stateless HMAC tokens — survive server restarts) ────────────
 
-// Simple token store (in-memory; resets on server restart)
-const adminTokens = new Set()
+// Token format: "adm:<timestamp>:<hmac-sha256-signature>"
+// Verified by re-computing the HMAC — no server-side state needed.
+const TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000  // tokens valid for 7 days
 
 function generateAdminToken() {
-  return `adm-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`
+  const payload = `adm:${Date.now()}`
+  const sig = createHmac('sha256', ADMIN_PASSWORD).update(payload).digest('hex')
+  return `${payload}:${sig}`
+}
+
+function verifyAdminToken(token) {
+  if (!token || typeof token !== 'string') return false
+  const parts = token.split(':')
+  if (parts.length !== 3 || parts[0] !== 'adm') return false
+  const timestamp = parseInt(parts[1], 10)
+  if (isNaN(timestamp) || Date.now() - timestamp > TOKEN_TTL_MS) return false
+  const payload = `${parts[0]}:${parts[1]}`
+  const expectedSig = createHmac('sha256', ADMIN_PASSWORD).update(payload).digest('hex')
+  // Constant-time comparison to prevent timing attacks
+  return expectedSig === parts[2]
 }
 
 function requireAdmin(req, res, next) {
   const token = req.headers['x-admin-token']
-  if (!token || !adminTokens.has(token)) {
+  if (!verifyAdminToken(token)) {
     return res.status(401).json({ error: 'Unauthorized. Admin token required.' })
   }
   next()
@@ -76,13 +92,11 @@ app.post('/api/admin/login', (req, res) => {
     return res.status(401).json({ error: 'Incorrect password.' })
   }
   const token = generateAdminToken()
-  adminTokens.add(token)
   res.json({ token })
 })
 
-app.post('/api/admin/logout', (req, res) => {
-  const token = req.headers['x-admin-token']
-  if (token) adminTokens.delete(token)
+app.post('/api/admin/logout', (_req, res) => {
+  // Stateless tokens: logout is handled client-side by clearing sessionStorage
   res.json({ ok: true })
 })
 
