@@ -64,6 +64,7 @@ export function AdminLoginView() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Enter admin password"
+                  autoComplete="current-password"
                   className="w-full rounded-lg border border-slate-600 bg-slate-900/70 px-4 py-3 pr-12 text-white placeholder-slate-500 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30"
                   autoFocus
                 />
