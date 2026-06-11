@@ -1,0 +1,112 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-display: "Space Grotesk", system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+@layer base {
+  html {
+    font-family: var(--font-display);
+    @apply antialiased;
+  }
+
+  body {
+    @apply bg-slate-50 text-slate-900 transition-colors duration-200;
+  }
+
+  html.dark body {
+    @apply bg-slate-950 text-white;
+  }
+}
+
+@layer utilities {
+  .animate-fade-in {
+    animation: fade-in 0.4s ease-out forwards;
+  }
+
+  .animate-shake {
+    animation: shake 0.45s ease-in-out;
+  }
+
+  .animate-pulse-skeleton {
+    animation: skeleton-shimmer 1.6s ease-in-out infinite;
+  }
+
+  .timer-amber {
+    animation: timer-flash-amber 1s ease-in-out infinite;
+  }
+
+  .timer-danger {
+    animation: timer-pulse-danger 0.8s ease-in-out infinite;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-6px); }
+  40% { transform: translateX(6px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(4px); }
+}
+
+@keyframes timer-flash-amber {
+  0%, 100% { color: rgb(245 158 11); }
+  50% { color: rgb(251 191 36); }
+}
+
+@keyframes timer-pulse-danger {
+  0%, 100% {
+    color: rgb(239 68 68);
+    transform: scale(1);
+  }
+  50% {
+    color: rgb(248 113 113);
+    transform: scale(1.05);
+  }
+}
+
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: -400px 0;
+  }
+  100% {
+    background-position: 400px 0;
+  }
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    rgb(226 232 240) 25%,
+    rgb(241 245 249) 50%,
+    rgb(226 232 240) 75%
+  );
+  background-size: 800px 100%;
+  animation: skeleton-shimmer 1.6s ease-in-out infinite;
+  border-radius: 0.5rem;
+}
+
+html.dark .skeleton {
+  background: linear-gradient(
+    90deg,
+    rgb(30 41 59) 25%,
+    rgb(51 65 85) 50%,
+    rgb(30 41 59) 75%
+  );
+  background-size: 800px 100%;
+  animation: skeleton-shimmer 1.6s ease-in-out infinite;
+}
