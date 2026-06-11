@@ -1,9 +1,11 @@
-import { readFileSync, writeFileSync, existsSync } from 'fs'
-import { dirname, join } from 'path'
-import { fileURLToPath } from 'url'
+import { MongoClient } from 'mongodb'
 
-const __dirname = dirname(fileURLToPath(import.meta.url))
-const DATA_PATH = join(__dirname, 'data.json')
+const MONGODB_URI = process.env.MONGODB_URI
+const DB_NAME = 'academyflow'
+const COLLECTION = 'store'
+
+let client = null
+let db = null
 
 const DEFAULT_DATA = {
   tests: [],
@@ -12,17 +14,72 @@ const DEFAULT_DATA = {
   pendingVerifications: [],
 }
 
-function ensureFile() {
-  if (!existsSync(DATA_PATH)) {
-    writeFileSync(DATA_PATH, JSON.stringify(DEFAULT_DATA, null, 2))
+export async function connectDB() {
+  if (!MONGODB_URI) {
+    console.warn('⚠️  MONGODB_URI not set — falling back to local data.json')
+    return false
+  }
+  try {
+    client = new MongoClient(MONGODB_URI, { serverSelectionTimeoutMS: 5000 })
+    await client.connect()
+    db = client.db(DB_NAME)
+    // Ensure the store document exists
+    const exists = await db.collection(COLLECTION).findOne({ _id: 'main' })
+    if (!exists) {
+      await db.collection(COLLECTION).insertOne({ _id: 'main', ...DEFAULT_DATA })
+    }
+    console.log('✅  Connected to MongoDB Atlas')
+    return true
+  } catch (err) {
+    console.error('❌  MongoDB connection failed:', err.message)
+    db = null
+    return false
   }
 }
 
-export function readData() {
-  ensureFile()
+export async function readData() {
+  if (!db) return readLocalData()
+  try {
+    const doc = await db.collection(COLLECTION).findOne({ _id: 'main' })
+    if (!doc) return { ...DEFAULT_DATA }
+    return {
+      tests: doc.tests ?? [],
+      submissions: doc.submissions ?? [],
+      students: doc.students ?? [],
+      pendingVerifications: doc.pendingVerifications ?? [],
+    }
+  } catch (err) {
+    console.error('readData error:', err.message)
+    return { ...DEFAULT_DATA }
+  }
+}
+
+export async function writeData(data) {
+  if (!db) return writeLocalData(data)
+  try {
+    await db.collection(COLLECTION).replaceOne(
+      { _id: 'main' },
+      { _id: 'main', ...data },
+      { upsert: true }
+    )
+  } catch (err) {
+    console.error('writeData error:', err.message)
+  }
+}
+
+// ─── Local JSON fallback (dev without MongoDB) ────────────────────────────────
+
+import { readFileSync, writeFileSync, existsSync } from 'fs'
+import { dirname, join } from 'path'
+import { fileURLToPath } from 'url'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const DATA_PATH = join(__dirname, 'data.json')
+
+function readLocalData() {
+  if (!existsSync(DATA_PATH)) return { ...DEFAULT_DATA }
   try {
     const raw = JSON.parse(readFileSync(DATA_PATH, 'utf-8'))
-    // Always return a complete data shape, even if the file is partial
     return {
       tests: raw.tests ?? [],
       submissions: raw.submissions ?? [],
@@ -34,26 +91,8 @@ export function readData() {
   }
 }
 
-// Synchronous write with a simple mutex flag to prevent interleaved writes.
-// For a flat-file store at this scale, synchronous writes are safe and avoid
-// the async Promise approach that caused node to exit prematurely.
-let writing = false
-
-export function writeData(data) {
-  // If a write is in progress, wait briefly then retry (busy-wait, max 1s)
-  if (writing) {
-    const deadline = Date.now() + 1000
-    while (writing && Date.now() < deadline) {
-      // spin – file writes are <5ms so this is fine for a dev/small-scale server
-    }
-  }
-  writing = true
-  try {
-    ensureFile()
-    writeFileSync(DATA_PATH, JSON.stringify(data, null, 2))
-  } finally {
-    writing = false
-  }
+function writeLocalData(data) {
+  writeFileSync(DATA_PATH, JSON.stringify(data, null, 2))
 }
 
 export function generateId(prefix) {

@@ -1,7 +1,7 @@
 import express from 'express'
 import cors from 'cors'
 import { createHmac } from 'crypto'
-import { readData, writeData, generateId } from './store.mjs'
+import { connectDB, readData, writeData, generateId } from './store.mjs'
 import { sendVerificationEmail } from './email.mjs'
 
 const app = express()
@@ -17,7 +17,6 @@ const ALLOWED_ORIGINS = [
 app.use(
   cors({
     origin: (origin, cb) => {
-      // Allow requests with no origin (curl, Postman, same-origin)
       if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true)
       cb(new Error(`CORS: origin ${origin} not allowed`))
     },
@@ -28,9 +27,9 @@ app.use(express.json({ limit: '2mb' }))
 
 // ─── Rate Limiting ────────────────────────────────────────────────────────────
 
-const rateLimitMap = new Map() // ip -> { count, resetAt }
-const RATE_LIMIT = 15          // max requests
-const RATE_WINDOW = 60 * 1000  // per 60 seconds
+const rateLimitMap = new Map()
+const RATE_LIMIT = 15
+const RATE_WINDOW = 60 * 1000
 
 function rateLimit(req, res, next) {
   const ip = req.ip || req.connection.remoteAddress || 'unknown'
@@ -54,11 +53,9 @@ function sanitizeString(val, maxLen = 512) {
   return val.trim().slice(0, maxLen)
 }
 
-// ─── Admin Auth (stateless HMAC tokens — survive server restarts) ────────────
+// ─── Admin Auth (stateless HMAC — survives restarts) ─────────────────────────
 
-// Token format: "adm:<timestamp>:<hmac-sha256-signature>"
-// Verified by re-computing the HMAC — no server-side state needed.
-const TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000  // tokens valid for 7 days
+const TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
 function generateAdminToken() {
   const payload = `adm:${Date.now()}`
@@ -74,7 +71,6 @@ function verifyAdminToken(token) {
   if (isNaN(timestamp) || Date.now() - timestamp > TOKEN_TTL_MS) return false
   const payload = `${parts[0]}:${parts[1]}`
   const expectedSig = createHmac('sha256', ADMIN_PASSWORD).update(payload).digest('hex')
-  // Constant-time comparison to prevent timing attacks
   return expectedSig === parts[2]
 }
 
@@ -91,12 +87,10 @@ app.post('/api/admin/login', (req, res) => {
   if (!password || password !== ADMIN_PASSWORD) {
     return res.status(401).json({ error: 'Incorrect password.' })
   }
-  const token = generateAdminToken()
-  res.json({ token })
+  res.json({ token: generateAdminToken() })
 })
 
 app.post('/api/admin/logout', (_req, res) => {
-  // Stateless tokens: logout is handled client-side by clearing sessionStorage
   res.json({ ok: true })
 })
 
@@ -116,43 +110,42 @@ function findStudent(data, registrationNumber, email) {
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
-// Public read (students need to fetch tests by ID)
-app.get('/api/tests/:id', (req, res) => {
-  const test = readData().tests.find((t) => t.id === req.params.id)
+app.get('/api/tests/:id', async (req, res) => {
+  const data = await readData()
+  const test = data.tests.find((t) => t.id === req.params.id)
   if (!test) return res.status(404).json({ error: 'Test not found' })
   res.json(test)
 })
 
-// Admin-protected routes
-app.get('/api/tests', requireAdmin, (_req, res) => {
-  res.json(readData().tests)
+app.get('/api/tests', requireAdmin, async (_req, res) => {
+  const data = await readData()
+  res.json(data.tests)
 })
 
-app.post('/api/tests', requireAdmin, (req, res) => {
-  const data = readData()
+app.post('/api/tests', requireAdmin, async (req, res) => {
+  const data = await readData()
   const test = { ...req.body, id: req.body.id || generateId('test') }
-  // Sanitize test fields
   test.title = sanitizeString(test.title, 200)
   test.description = sanitizeString(test.description, 2000)
   test.code = sanitizeString(test.code, 50)
   const idx = data.tests.findIndex((t) => t.id === test.id)
   if (idx >= 0) data.tests[idx] = test
   else data.tests.push(test)
-  writeData(data)
+  await writeData(data)
   res.json(test)
 })
 
-app.delete('/api/tests/:id', requireAdmin, (req, res) => {
-  const data = readData()
+app.delete('/api/tests/:id', requireAdmin, async (req, res) => {
+  const data = await readData()
   data.tests = data.tests.filter((t) => t.id !== req.params.id)
-  writeData(data)
+  await writeData(data)
   res.json({ ok: true })
 })
 
 // ─── Submissions ──────────────────────────────────────────────────────────────
 
-app.get('/api/submissions', requireAdmin, (req, res) => {
-  const data = readData()
+app.get('/api/submissions', requireAdmin, async (req, res) => {
+  const data = await readData()
   const { testId, studentId } = req.query
   let subs = data.submissions
   if (testId) subs = subs.filter((s) => s.testId === testId)
@@ -160,9 +153,8 @@ app.get('/api/submissions', requireAdmin, (req, res) => {
   res.json(subs)
 })
 
-// Student checks their own submissions — no admin token needed but requires studentId match
-app.get('/api/submissions/student', (req, res) => {
-  const data = readData()
+app.get('/api/submissions/student', async (req, res) => {
+  const data = await readData()
   const { testId, studentId } = req.query
   if (!studentId) return res.status(400).json({ error: 'studentId required' })
   let subs = data.submissions.filter((s) => s.studentId === studentId)
@@ -170,17 +162,15 @@ app.get('/api/submissions/student', (req, res) => {
   res.json(subs)
 })
 
-app.post('/api/submissions', (req, res) => {
-  const data = readData()
+app.post('/api/submissions', async (req, res) => {
+  const data = await readData()
   const { testId, studentId } = req.body
-
   const existing = data.submissions.find(
     (s) => s.testId === testId && s.studentId === studentId
   )
   if (existing) {
     return res.status(409).json({ error: 'You have already attempted this test.' })
   }
-
   const submission = {
     ...req.body,
     id: req.body.id || generateId('sub'),
@@ -188,39 +178,37 @@ app.post('/api/submissions', (req, res) => {
     active: true,
   }
   data.submissions.push(submission)
-  writeData(data)
+  await writeData(data)
   res.json(submission)
 })
 
-app.delete('/api/submissions/:id', requireAdmin, (req, res) => {
-  const data = readData()
+app.delete('/api/submissions/:id', requireAdmin, async (req, res) => {
+  const data = await readData()
   const exists = data.submissions.find((s) => s.id === req.params.id)
   if (!exists) return res.status(404).json({ error: 'Submission not found' })
   data.submissions = data.submissions.filter((s) => s.id !== req.params.id)
-  writeData(data)
+  await writeData(data)
   res.json({ ok: true })
 })
 
 // ─── Students ─────────────────────────────────────────────────────────────────
 
-app.get('/api/students', requireAdmin, (_req, res) => {
-  const data = readData()
-  // Never expose passwords or verification codes
+app.get('/api/students', requireAdmin, async (_req, res) => {
+  const data = await readData()
   const safe = data.students.map(({ id, fullName, registrationNumber, email, verified, createdAt }) => ({
     id, fullName, registrationNumber, email, verified, createdAt,
   }))
   res.json(safe)
 })
 
-app.delete('/api/students/:id', requireAdmin, (req, res) => {
-  const data = readData()
+app.delete('/api/students/:id', requireAdmin, async (req, res) => {
+  const data = await readData()
   const exists = data.students.find((s) => s.id === req.params.id)
   if (!exists) return res.status(404).json({ error: 'Student not found' })
   data.students = data.students.filter((s) => s.id !== req.params.id)
-  // Also remove their submissions and pending verifications
   data.submissions = data.submissions.filter((s) => s.studentId !== req.params.id)
   data.pendingVerifications = data.pendingVerifications.filter((p) => p.studentId !== req.params.id)
-  writeData(data)
+  await writeData(data)
   res.json({ ok: true })
 })
 
@@ -235,7 +223,7 @@ app.post('/api/auth/signup', rateLimit, async (req, res) => {
     return res.status(400).json({ error: 'Full name, registration number, and email are required.' })
   }
 
-  const data = readData()
+  const data = await readData()
   const reg = registrationNumber.trim()
   const em = email.trim().toLowerCase()
 
@@ -268,11 +256,10 @@ app.post('/api/auth/signup', rateLimit, async (req, res) => {
 
   const code = generateCode()
   const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString()
-
   data.pendingVerifications = data.pendingVerifications.filter((p) => p.email !== em)
   data.pendingVerifications.push({ email: em, code, expiresAt, studentId: student.id })
 
-  writeData(data)
+  await writeData(data)
 
   const emailResult = await sendVerificationEmail(em, code)
   res.json({
@@ -285,7 +272,7 @@ app.post('/api/auth/signup', rateLimit, async (req, res) => {
   })
 })
 
-app.post('/api/auth/verify', rateLimit, (req, res) => {
+app.post('/api/auth/verify', rateLimit, async (req, res) => {
   const email = sanitizeString(req.body.email, 200)
   const code = sanitizeString(req.body.code, 10)
 
@@ -293,26 +280,20 @@ app.post('/api/auth/verify', rateLimit, (req, res) => {
     return res.status(400).json({ error: 'Email and verification code are required.' })
   }
 
-  const data = readData()
+  const data = await readData()
   const em = email.trim().toLowerCase()
   const pending = data.pendingVerifications.find((p) => p.email === em)
 
-  if (!pending) {
-    return res.status(400).json({ error: 'No pending verification. Please sign up again.' })
-  }
-  if (new Date(pending.expiresAt) < new Date()) {
-    return res.status(400).json({ error: 'Verification code expired. Request a new one.' })
-  }
-  if (pending.code !== code.trim()) {
-    return res.status(400).json({ error: 'Invalid verification code.' })
-  }
+  if (!pending) return res.status(400).json({ error: 'No pending verification. Please sign up again.' })
+  if (new Date(pending.expiresAt) < new Date()) return res.status(400).json({ error: 'Verification code expired. Request a new one.' })
+  if (pending.code !== code.trim()) return res.status(400).json({ error: 'Invalid verification code.' })
 
   const student = data.students.find((s) => s.id === pending.studentId)
   if (!student) return res.status(404).json({ error: 'Student not found.' })
 
   student.verified = true
   data.pendingVerifications = data.pendingVerifications.filter((p) => p.email !== em)
-  writeData(data)
+  await writeData(data)
 
   res.json({
     student: {
@@ -328,20 +309,17 @@ app.post('/api/auth/verify', rateLimit, (req, res) => {
 app.post('/api/auth/resend', rateLimit, async (req, res) => {
   const registrationNumber = sanitizeString(req.body.registrationNumber, 50)
   const email = sanitizeString(req.body.email, 200)
-  const data = readData()
+  const data = await readData()
   const student = findStudent(data, registrationNumber, email)
 
-  if (!student) {
-    return res.status(404).json({ error: 'Account not found. Please sign up first.' })
-  }
+  if (!student) return res.status(404).json({ error: 'Account not found. Please sign up first.' })
 
   const code = generateCode()
   const em = student.email.toLowerCase()
   const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString()
-
   data.pendingVerifications = data.pendingVerifications.filter((p) => p.email !== em)
   data.pendingVerifications.push({ email: em, code, expiresAt, studentId: student.id })
-  writeData(data)
+  await writeData(data)
 
   const emailResult = await sendVerificationEmail(em, code)
   res.json({
@@ -353,19 +331,18 @@ app.post('/api/auth/resend', rateLimit, async (req, res) => {
 app.post('/api/auth/login', rateLimit, async (req, res) => {
   const registrationNumber = sanitizeString(req.body.registrationNumber, 50)
   const email = sanitizeString(req.body.email, 200)
-  const data = readData()
+  const data = await readData()
   const student = findStudent(data, registrationNumber, email)
 
-  if (!student) {
-    return res.status(404).json({ error: 'Account not found. Please sign up first.' })
-  }
+  if (!student) return res.status(404).json({ error: 'Account not found. Please sign up first.' })
+
   if (!student.verified) {
     const code = generateCode()
     const em = student.email.toLowerCase()
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString()
     data.pendingVerifications = data.pendingVerifications.filter((p) => p.email !== em)
     data.pendingVerifications.push({ email: em, code, expiresAt, studentId: student.id })
-    writeData(data)
+    await writeData(data)
     const emailResult = await sendVerificationEmail(em, code)
     return res.json({
       requiresVerification: true,
@@ -385,7 +362,15 @@ app.post('/api/auth/login', rateLimit, async (req, res) => {
   })
 })
 
-app.listen(PORT, () => {
-  console.log(`AcademyFlow API running on http://localhost:${PORT}`)
-  console.log(`Admin password: ${ADMIN_PASSWORD === 'admin1234' ? '⚠️  Using default password! Set ADMIN_PASSWORD in .env' : '✓ Custom password set'}`)
-})
+// ─── Start ────────────────────────────────────────────────────────────────────
+
+async function start() {
+  await connectDB()
+  app.listen(PORT, () => {
+    console.log(`AcademyFlow API running on http://localhost:${PORT}`)
+    console.log(`Admin password: ${ADMIN_PASSWORD === 'admin1234' ? '⚠️  Using default! Set ADMIN_PASSWORD in .env' : '✓ Custom password set'}`)
+    console.log(`MongoDB: ${process.env.MONGODB_URI ? '✓ Atlas connected' : '⚠️  No MONGODB_URI — using local data.json'}`)
+  })
+}
+
+start()
