@@ -2,18 +2,28 @@
 
 Academic MCQ platform with separate instructor and student flows, scheduled tests, email verification, and proctored timed exams.
 
-## Assessment safeguards
+## Assessment Safeguards & Anti-Cheat
 
-- Students sign in with a one-time email code; signed sessions are bound to their own attempts and results.
-- A mandatory readiness gate checks HTTPS/localhost, API health, camera, microphone, the local MediaPipe face model, exactly one visible face, fullscreen support, and explicit monitoring consent.
-- Camera analysis happens in the browser. Video frames are not uploaded or recorded; only timestamped proctor events are saved.
-- The API creates the attempt and owns its start/expiry timestamps. Browser-supplied scores and durations are ignored.
-- Answers, navigation position, flags, and proctor events autosave. Refreshing or reconnecting resumes the same one-attempt session.
-- Instructors can assign per-student extra time in 15-minute increments before an attempt starts.
-- Students receive their score after submission, but the answer key remains locked until the assessment window closes.
-- Correct answers and full submissions remain available to authenticated instructors.
+- **Identity Verification & Session Integrity:** Students sign in with a one-time email code. Sessions are strictly bound to their attempt and cannot be resumed on another device.
+- **Hardware & Environment Readiness:** A mandatory readiness gate enforces checks on HTTPS, API health, camera, microphone, local MediaPipe face models, and explicit monitoring consent.
+- **AI Gaze & Face Tracking:** The browser continuously tracks the candidate's face. The assessment requires exactly one face looking at the screen. Looking away or having multiple people in frame triggers an alert.
+- **Object Detection (Phones):** The AI proctor utilizes a vision model (COCO-SSD via MediaPipe) to detect unauthorized devices (e.g., cell phones) in the camera frame.
+- **Audio Monitoring:** The system continuously monitors the microphone's audio levels. Speaking aloud or significant background noise triggers an audio alert.
+- **Anti-Photography measures:** 
+  - An invisible Moiré pattern grid overlay is placed on the screen. If a student tries to photograph their screen, it significantly distorts the image.
+  - A dynamic, moving watermark containing the candidate's name overlays the exam view to trace any leaked images.
+- **Copy/Paste Prevention:** Text selection and the context menu are disabled globally during the exam to prevent copying the question or pasting answers.
+- **Data Privacy:** All camera and audio analysis happens locally in the browser. Raw video and audio streams are *never* uploaded. Only timestamped proctor alerts are logged to the server.
 
-Proctor flags are review signals, not automatic proof of misconduct. An instructor should review context and provide an accommodation path when camera, microphone, fullscreen, or timed conditions are not appropriate for a student.
+Proctor flags are review signals, not automatic proof of misconduct. Instructors should review the context and provide accommodations when necessary.
+
+## Coding Assessments
+
+In addition to standard MCQs, AcademyFlow supports full-fledged coding tests:
+- **Assessment Builder:** Instructors can add Coding Questions alongside MCQs, configure mark values, and provide detailed problem statements.
+- **In-Browser IDE:** Candidates solve coding challenges using an integrated Monaco Editor (the same engine behind VS Code) with syntax highlighting and auto-completion.
+- **Test Cases:** Instructors can define multiple test cases consisting of STDIN inputs and expected STDOUT outputs. Test cases can be marked as visible (sample cases) or hidden.
+- **Auto-Grading:** Submissions are securely executed and evaluated on the backend using the Piston Execution Engine, ensuring accurate and automatic scoring against all test cases.
 
 ## Roles & URLs
 
