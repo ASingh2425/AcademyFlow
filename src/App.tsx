@@ -7,7 +7,7 @@ import { api } from './lib/api'
 import { loadDarkMode, saveDarkMode } from './lib/storage'
 import { calculateScore, getTotalMarks } from './lib/scoring'
 import { generateId } from './lib/storage'
-import type { ExamSession, Submission, Test } from './types'
+import type { ExamAttempt, ExamSession, Submission, Test } from './types'
 import { AdminDashboard } from './views/AdminDashboard'
 import { AdminLoginView } from './views/AdminLoginView'
 import { ExamView } from './views/ExamView'
@@ -182,20 +182,22 @@ function StudentApp() {
   const [activeTest, setActiveTest] = useState<Test | null>(null)
   const [activeSubmission, setActiveSubmission] = useState<Submission | null>(null)
 
-  const handleStartTest = (test: Test) => {
+  const handleStartTest = (test: Test, attempt: ExamAttempt) => {
     if (!student) return
     setActiveTest(test)
     setExamSession({
+      attemptId: attempt.id,
       testId: test.id,
       studentId: student.id,
       candidateName: student.fullName,
       registrationNumber: student.registrationNumber,
       email: student.email,
-      answers: test.questions.map(() => null),
-      flaggedQuestions: [],
-      currentIndex: 0,
-      startedAt: Date.now(),
-      proctorEvents: [],
+      answers: attempt.answers,
+      flaggedQuestions: attempt.flaggedQuestions,
+      currentIndex: attempt.currentIndex,
+      startedAt: new Date(attempt.startedAt).getTime(),
+      expiresAt: new Date(attempt.expiresAt).getTime(),
+      proctorEvents: attempt.proctorEvents,
     })
     setPhase('exam')
   }
@@ -209,6 +211,7 @@ function StudentApp() {
 
       try {
         const submission = await api.saveSubmission({
+          attemptId: session.attemptId,
           testId: activeTest.id,
           testTitle: activeTest.title,
           studentId: session.studentId,

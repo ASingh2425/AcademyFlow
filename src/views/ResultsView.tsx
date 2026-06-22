@@ -16,6 +16,12 @@ export function ResultsView({ submission, test, isAdmin, onDone }: ResultsViewPr
   const [logOpen, setLogOpen] = useState(false)
   const pristine = submission.proctorEvents.length === 0
   const totalMarks = submission.totalMarks ?? getTotalMarks(test.questions)
+  const reviewQuestions = submission.correctAnswers
+    ? test.questions.map((question, index) => ({
+        ...question,
+        correctIndex: submission.correctAnswers?.[index] ?? -1,
+      }))
+    : test.questions
 
   return (
     <div className="animate-fade-in mx-auto max-w-4xl px-4 py-8 sm:px-6">
@@ -88,7 +94,13 @@ export function ResultsView({ submission, test, isAdmin, onDone }: ResultsViewPr
         <h3 className="mb-4 text-lg font-semibold text-slate-900 dark:text-white">
           Verification Sheet
         </h3>
-        <QuestionReview questions={test.questions} answers={submission.answers} />
+        {submission.correctAnswers || isAdmin ? (
+          <QuestionReview questions={reviewQuestions} answers={submission.answers} />
+        ) : (
+          <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-800 dark:border-indigo-800 dark:bg-indigo-950/30 dark:text-indigo-300">
+            Correct answers will be available after the assessment window closes.
+          </div>
+        )}
       </div>
 
       <div className="flex flex-wrap gap-3">

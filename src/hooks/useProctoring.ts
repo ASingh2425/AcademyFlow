@@ -30,11 +30,48 @@ export function useProctoring(
 
     const fire = (msg: string) => logEvent(onEventRef.current, msg)
 
-    // Tab/window focus loss
-    const handleBlur = () => fire('Tab focus lost (potential external look-up)')
-    window.addEventListener('blur', handleBlur)
+    // CameraProctor owns the stream. Here we only detect devices that disappear,
+    // which avoids a second permission prompt and duplicate camera capture.
+    let knownVideoInputs = new Set<string>()
+    let knownAudioInputs = new Set<string>()
+    const snapshotDevices = async (reportChanges: boolean) => {
+      if (!navigator.mediaDevices?.enumerateDevices) return
+      const devices = await navigator.mediaDevices.enumerateDevices()
+      const videoInputs = new Set(
+        devices.filter((device) => device.kind === 'videoinput').map((device) => device.deviceId)
+      )
+      const audioInputs = new Set(
+        devices.filter((device) => device.kind === 'audioinput').map((device) => device.deviceId)
+      )
 
-    // Copy / cut / paste
+      if (reportChanges && [...knownVideoInputs].some((id) => !videoInputs.has(id))) {
+        fire('Camera disconnected during exam')
+      }
+      if (reportChanges && [...knownAudioInputs].some((id) => !audioInputs.has(id))) {
+        fire('Microphone disconnected during exam')
+      }
+      knownVideoInputs = videoInputs
+      knownAudioInputs = audioInputs
+    }
+    const handleDeviceChange = () => {
+      snapshotDevices(true).catch(() => fire('Media device status could not be checked'))
+    }
+    snapshotDevices(false).catch(() => undefined)
+    navigator.mediaDevices?.addEventListener('devicechange', handleDeviceChange)
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') fire('Exam tab hidden or switched')
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    const handleFullscreenChange = () => {
+      if (!document.fullscreenElement) fire('Fullscreen mode exited during exam')
+    }
+    document.addEventListener('fullscreenchange', handleFullscreenChange)
+
+    const handleOffline = () => fire('Network connection lost during exam')
+    window.addEventListener('offline', handleOffline)
+
     const handleCopy = () => fire('Text copy attempted')
     const handleCut = () => fire('Text cut attempted')
     const handlePaste = () => fire('Paste attempted')
@@ -42,35 +79,37 @@ export function useProctoring(
     document.addEventListener('cut', handleCut)
     document.addEventListener('paste', handlePaste)
 
-    // Right-click context menu
-    const handleContextMenu = (e: MouseEvent) => {
-      e.preventDefault()
+    const handleContextMenu = (event: MouseEvent) => {
+      event.preventDefault()
       fire('Right-click / context menu attempted')
     }
     document.addEventListener('contextmenu', handleContextMenu)
 
-    // Keyboard shortcuts — Ctrl/Meta+C, Ctrl/Meta+V, PrintScreen, etc.
-    const handleKeydown = (e: KeyboardEvent) => {
-      const ctrl = e.ctrlKey || e.metaKey
-      if (ctrl && (e.key === 'c' || e.key === 'C')) fire('Ctrl+C shortcut detected')
-      else if (ctrl && (e.key === 'v' || e.key === 'V')) fire('Ctrl+V shortcut detected')
-      else if (ctrl && (e.key === 'Tab')) fire('Ctrl+Tab (tab switch shortcut) detected')
-      else if (e.key === 'PrintScreen') fire('PrintScreen key pressed')
-      else if (e.altKey && e.key === 'Tab') fire('Alt+Tab (window switch shortcut) detected')
+    const handleKeydown = (event: KeyboardEvent) => {
+      const ctrl = event.ctrlKey || event.metaKey
+      if (ctrl && event.key.toLowerCase() === 'c') fire('Copy shortcut detected')
+      else if (ctrl && event.key.toLowerCase() === 'v') fire('Paste shortcut detected')
+      else if (ctrl && event.key === 'Tab') fire('Ctrl+Tab (tab switch shortcut) detected')
+      else if (event.key === 'PrintScreen') fire('PrintScreen key pressed')
+      else if (event.altKey && event.key === 'Tab') fire('Alt+Tab (window switch shortcut) detected')
     }
     document.addEventListener('keydown', handleKeydown)
 
-    // Window resize — large width drop may indicate DevTools opened on side
     let lastWidth = window.innerWidth
     const handleResize = () => {
-      const diff = lastWidth - window.innerWidth
-      if (diff > 200) fire(`Window resized significantly (possible DevTools opened: −${diff}px)`)
+      const difference = lastWidth - window.innerWidth
+      if (difference > 200) {
+        fire(`Window resized significantly (possible DevTools opened: −${difference}px)`)
+      }
       lastWidth = window.innerWidth
     }
     window.addEventListener('resize', handleResize)
 
     return () => {
-      window.removeEventListener('blur', handleBlur)
+      navigator.mediaDevices?.removeEventListener('devicechange', handleDeviceChange)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      document.removeEventListener('fullscreenchange', handleFullscreenChange)
+      window.removeEventListener('offline', handleOffline)
       document.removeEventListener('copy', handleCopy)
       document.removeEventListener('cut', handleCut)
       document.removeEventListener('paste', handlePaste)
