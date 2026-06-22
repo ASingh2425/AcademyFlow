@@ -1,6 +1,10 @@
+import dotenv from 'dotenv'
 import { MongoClient } from 'mongodb'
 
+dotenv.config()
+
 const MONGODB_URI = process.env.MONGODB_URI
+const USE_LOCAL_DATA = process.env.DATA_STORE === 'local'
 const DB_NAME = 'academyflow'
 const COLLECTION = 'store'
 
@@ -9,13 +13,14 @@ let db = null
 
 const DEFAULT_DATA = {
   tests: [],
+  attempts: [],
   submissions: [],
   students: [],
   pendingVerifications: [],
 }
 
 export async function connectDB() {
-  if (!MONGODB_URI) {
+  if (USE_LOCAL_DATA || !MONGODB_URI) {
     console.warn('⚠️  MONGODB_URI not set — falling back to local data.json')
     return false
   }
@@ -38,25 +43,34 @@ export async function connectDB() {
 }
 
 export async function readData() {
-  if (!db) return readLocalData()
+  if (!db) {
+    console.log('readData: using local data (db not set)')
+    return readLocalData()
+  }
   try {
+    console.log('readData: using MongoDB')
     const doc = await db.collection(COLLECTION).findOne({ _id: 'main' })
     if (!doc) return { ...DEFAULT_DATA }
     return {
       tests: doc.tests ?? [],
+      attempts: doc.attempts ?? [],
       submissions: doc.submissions ?? [],
       students: doc.students ?? [],
       pendingVerifications: doc.pendingVerifications ?? [],
     }
   } catch (err) {
     console.error('readData error:', err.message)
-    return { ...DEFAULT_DATA }
+    throw err
   }
 }
 
 export async function writeData(data) {
-  if (!db) return writeLocalData(data)
+  if (!db) {
+    console.log('writeData: using local data (db not set)')
+    return writeLocalData(data)
+  }
   try {
+    console.log('writeData: using MongoDB')
     await db.collection(COLLECTION).replaceOne(
       { _id: 'main' },
       { _id: 'main', ...data },
@@ -64,17 +78,18 @@ export async function writeData(data) {
     )
   } catch (err) {
     console.error('writeData error:', err.message)
+    throw err
   }
 }
 
 // ─── Local JSON fallback (dev without MongoDB) ────────────────────────────────
 
-import { readFileSync, writeFileSync, existsSync } from 'fs'
-import { dirname, join } from 'path'
+import { readFileSync, writeFileSync, renameSync, existsSync } from 'fs'
+import { dirname, join, resolve } from 'path'
 import { fileURLToPath } from 'url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const DATA_PATH = join(__dirname, 'data.json')
+const DATA_PATH = process.env.DATA_PATH ? resolve(process.env.DATA_PATH) : join(__dirname, 'data.json')
 
 function readLocalData() {
   if (!existsSync(DATA_PATH)) return { ...DEFAULT_DATA }
@@ -82,17 +97,20 @@ function readLocalData() {
     const raw = JSON.parse(readFileSync(DATA_PATH, 'utf-8'))
     return {
       tests: raw.tests ?? [],
+      attempts: raw.attempts ?? [],
       submissions: raw.submissions ?? [],
       students: raw.students ?? [],
       pendingVerifications: raw.pendingVerifications ?? [],
     }
-  } catch {
-    return { ...DEFAULT_DATA }
+  } catch (error) {
+    throw new Error(`Local data file is invalid: ${error.message}`)
   }
 }
 
 function writeLocalData(data) {
-  writeFileSync(DATA_PATH, JSON.stringify(data, null, 2))
+  const temporaryPath = `${DATA_PATH}.tmp`
+  writeFileSync(temporaryPath, JSON.stringify(data, null, 2))
+  renameSync(temporaryPath, DATA_PATH)
 }
 
 export function generateId(prefix) {

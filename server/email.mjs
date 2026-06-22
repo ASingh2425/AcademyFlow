@@ -4,6 +4,7 @@ let transporter = null
 
 function getTransporter() {
   if (transporter) return transporter
+  if (process.env.EMAIL_MODE === 'console') return null
 
   const host = process.env.SMTP_HOST
   const user = process.env.SMTP_USER

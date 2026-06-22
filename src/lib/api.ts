@@ -1,4 +1,4 @@
-import type { Student, Submission, Test } from '../types'
+import type { ExamAttempt, ExamSession, Student, Submission, Test } from '../types'
 
 // In production: VITE_API_URL points to the Render backend (e.g. https://academyflow-api.onrender.com/api)
 // In local dev: Vite proxies /api → http://localhost:3001 automatically
@@ -13,12 +13,30 @@ function getAdminToken(): string | null {
   }
 }
 
+function getStudentToken(): string | null {
+  try {
+    const session = JSON.parse(localStorage.getItem('academyflow_student_session') || 'null')
+    return typeof session?.sessionToken === 'string' ? session.sessionToken : null
+  } catch {
+    return null
+  }
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const studentToken = getStudentToken()
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(studentToken ? { 'x-student-token': studentToken } : {}),
+      ...options?.headers,
+    },
     ...options,
   })
   const data = await res.json().catch(() => ({}))
+  if (res.status === 401 && studentToken && (path.startsWith('/submissions') || path.startsWith('/live'))) {
+    localStorage.removeItem('academyflow_student_session')
+    window.dispatchEvent(new Event('academyflow:student-session-expired'))
+  }
   if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`)
   return data as T
 }
@@ -53,6 +71,22 @@ export const api = {
   deleteTest: (id: string) =>
     adminRequest<{ ok: boolean }>(`/tests/${id}`, { method: 'DELETE' }),
 
+  // ── Exam attempts ─────────────────────────────────────────────────────────
+  getAttempt: (testId: string) => request<ExamAttempt | null>(`/attempts/${testId}`),
+  startAttempt: (testId: string) => request<ExamAttempt>('/attempts/start', {
+    method: 'POST',
+    body: JSON.stringify({ testId, monitoringConsent: true }),
+  }),
+  saveAttempt: (session: ExamSession) => request<ExamAttempt>(`/attempts/${session.attemptId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      answers: session.answers,
+      flaggedQuestions: session.flaggedQuestions,
+      currentIndex: session.currentIndex,
+      proctorEvents: session.proctorEvents,
+    }),
+  }),
+
   // ── Submissions ───────────────────────────────────────────────────────────
   // Admin: get all submissions
   getSubmissions: (params?: { testId?: string; studentId?: string }) => {
@@ -69,7 +103,7 @@ export const api = {
     if (params.testId) q.set('testId', params.testId)
     return request<Submission[]>(`/submissions/student?${q.toString()}`)
   },
-  saveSubmission: (submission: Omit<Submission, 'id'> & { id?: string }) =>
+  saveSubmission: (submission: Omit<Submission, 'id'> & { attemptId: string; id?: string }) =>
     request<Submission>('/submissions', {
       method: 'POST',
       body: JSON.stringify(submission),
@@ -79,6 +113,11 @@ export const api = {
 
   // ── Students ──────────────────────────────────────────────────────────────
   getStudents: () => adminRequest<Student[]>('/students'),
+  setStudentExtraTime: (id: string, extraTimeMinutes: number) =>
+    adminRequest<Student>(`/students/${id}/accommodations`, {
+      method: 'PATCH',
+      body: JSON.stringify({ extraTimeMinutes }),
+    }),
   deleteStudent: (id: string) =>
     adminRequest<{ ok: boolean }>(`/students/${id}`, { method: 'DELETE' }),
 

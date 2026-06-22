@@ -1,18 +1,27 @@
 import express from 'express'
 import cors from 'cors'
-import { createHmac } from 'crypto'
+import dotenv from 'dotenv'
+import helmet from 'helmet'
+import { createHmac, randomInt, timingSafeEqual } from 'crypto'
 import { connectDB, readData, writeData, generateId } from './store.mjs'
 import { sendVerificationEmail } from './email.mjs'
+
+dotenv.config()
 
 const app = express()
 const PORT = process.env.API_PORT || 3001
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin1234'
+if (process.env.NODE_ENV === 'production') app.set('trust proxy', 1)
 
 const ALLOWED_ORIGINS = [
   'http://localhost:5173',
-  'http://localhost:4173',
-  ...(process.env.ALLOWED_ORIGIN ? [process.env.ALLOWED_ORIGIN] : []),
+  'http://localhost:5174',
+  'http://localhost:5175',
+  'http://localhost:5176',
+  ...(process.env.ALLOWED_ORIGIN ? process.env.ALLOWED_ORIGIN.split(',').map((origin) => origin.trim()) : []),
 ]
+
+app.use(helmet({ contentSecurityPolicy: false, crossOriginResourcePolicy: false }))
 
 app.use(
   cors({
@@ -25,15 +34,26 @@ app.use(
 )
 app.use(express.json({ limit: '2mb' }))
 
+app.get('/api/health', (_req, res) => {
+  res.json({ ok: true, service: 'academyflow-api' })
+})
+
 // ─── Rate Limiting ────────────────────────────────────────────────────────────
 
 const rateLimitMap = new Map()
 const RATE_LIMIT = 15
 const RATE_WINDOW = 60 * 1000
+let rateLimitRequests = 0
 
 function rateLimit(req, res, next) {
   const ip = req.ip || req.connection.remoteAddress || 'unknown'
   const now = Date.now()
+  rateLimitRequests++
+  if (rateLimitRequests % 100 === 0) {
+    for (const [key, value] of rateLimitMap) {
+      if (now > value.resetAt) rateLimitMap.delete(key)
+    }
+  }
   let entry = rateLimitMap.get(ip)
   if (!entry || now > entry.resetAt) {
     entry = { count: 0, resetAt: now + RATE_WINDOW }
@@ -41,9 +61,19 @@ function rateLimit(req, res, next) {
   }
   entry.count++
   if (entry.count > RATE_LIMIT) {
+    res.setHeader('Retry-After', Math.ceil((entry.resetAt - now) / 1000))
     return res.status(429).json({ error: 'Too many requests. Please wait a minute.' })
   }
   next()
+}
+
+let mutationQueue = Promise.resolve()
+function serializeMutation(handler) {
+  return (req, res, next) => {
+    const operation = mutationQueue.then(() => handler(req, res, next))
+    mutationQueue = operation.catch(() => undefined)
+    return operation.catch(next)
+  }
 }
 
 // ─── Input Sanitization ───────────────────────────────────────────────────────
@@ -56,6 +86,7 @@ function sanitizeString(val, maxLen = 512) {
 // ─── Admin Auth (stateless HMAC — survives restarts) ─────────────────────────
 
 const TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000
+const STUDENT_TOKEN_TTL_MS = 12 * 60 * 60 * 1000
 
 function generateAdminToken() {
   const payload = `adm:${Date.now()}`
@@ -68,10 +99,12 @@ function verifyAdminToken(token) {
   const parts = token.split(':')
   if (parts.length !== 3 || parts[0] !== 'adm') return false
   const timestamp = parseInt(parts[1], 10)
-  if (isNaN(timestamp) || Date.now() - timestamp > TOKEN_TTL_MS) return false
+  if (isNaN(timestamp) || timestamp > Date.now() + 60_000 || Date.now() - timestamp > TOKEN_TTL_MS) return false
   const payload = `${parts[0]}:${parts[1]}`
   const expectedSig = createHmac('sha256', ADMIN_PASSWORD).update(payload).digest('hex')
-  return expectedSig === parts[2]
+  const actual = Buffer.from(parts[2], 'hex')
+  const expected = Buffer.from(expectedSig, 'hex')
+  return actual.length === expected.length && timingSafeEqual(actual, expected)
 }
 
 function requireAdmin(req, res, next) {
@@ -82,7 +115,35 @@ function requireAdmin(req, res, next) {
   next()
 }
 
-app.post('/api/admin/login', (req, res) => {
+function generateStudentToken(studentId) {
+  const timestamp = Date.now()
+  const payload = `stu:${studentId}:${timestamp}`
+  const signature = createHmac('sha256', ADMIN_PASSWORD).update(payload).digest('hex')
+  return `${payload}:${signature}`
+}
+
+function verifyStudentToken(token) {
+  if (!token || typeof token !== 'string') return null
+  const parts = token.split(':')
+  if (parts.length !== 4 || parts[0] !== 'stu') return null
+  const timestamp = Number(parts[2])
+  if (!Number.isFinite(timestamp) || timestamp > Date.now() + 60_000 || Date.now() - timestamp > STUDENT_TOKEN_TTL_MS) {
+    return null
+  }
+  const payload = `${parts[0]}:${parts[1]}:${parts[2]}`
+  const expected = Buffer.from(createHmac('sha256', ADMIN_PASSWORD).update(payload).digest('hex'), 'hex')
+  const actual = Buffer.from(parts[3], 'hex')
+  return actual.length === expected.length && timingSafeEqual(actual, expected) ? parts[1] : null
+}
+
+function requireStudent(req, res, next) {
+  const studentId = verifyStudentToken(req.headers['x-student-token'])
+  if (!studentId) return res.status(401).json({ error: 'Student session expired. Please sign in again.' })
+  req.studentId = studentId
+  next()
+}
+
+app.post('/api/admin/login', rateLimit, (req, res) => {
   const { password } = req.body
   if (!password || password !== ADMIN_PASSWORD) {
     return res.status(401).json({ error: 'Incorrect password.' })
@@ -97,7 +158,85 @@ app.post('/api/admin/logout', (_req, res) => {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function generateCode() {
-  return String(Math.floor(100000 + Math.random() * 900000))
+  return String(randomInt(100000, 1000000))
+}
+
+function publicTest(test) {
+  return {
+    ...test,
+    questions: Array.isArray(test.questions)
+      ? test.questions.map(({ correctIndex: _correctIndex, ...question }) => ({
+          ...question,
+          correctIndex: -1,
+        }))
+      : [],
+  }
+}
+
+function studentSubmission(data, submission) {
+  const test = data.tests.find((item) => item.id === submission.testId)
+  if (test && Date.now() < new Date(test.scheduledEnd).getTime()) {
+    const { correctAnswers: _correctAnswers, ...safe } = submission
+    return safe
+  }
+  return submission
+}
+
+function validatedTest(input) {
+  const title = sanitizeString(input?.title, 200)
+  const code = sanitizeString(input?.code, 50)
+  const description = sanitizeString(input?.description, 2000)
+  const timeLimitMinutes = Number(input?.timeLimitMinutes)
+  const scheduledStart = new Date(input?.scheduledStart)
+  const scheduledEnd = new Date(input?.scheduledEnd)
+  if (!title || !code) throw new Error('Test title and code are required.')
+  if (!Number.isFinite(timeLimitMinutes) || timeLimitMinutes < 1 || timeLimitMinutes > 480) {
+    throw new Error('Time limit must be between 1 and 480 minutes.')
+  }
+  if (Number.isNaN(scheduledStart.getTime()) || Number.isNaN(scheduledEnd.getTime()) || scheduledStart >= scheduledEnd) {
+    throw new Error('A valid schedule with an end after the start is required.')
+  }
+  if (!Array.isArray(input?.questions) || input.questions.length < 1 || input.questions.length > 500) {
+    throw new Error('A test must contain between 1 and 500 questions.')
+  }
+  const questions = input.questions.map((question, index) => {
+    const text = sanitizeString(question?.text, 4000)
+    const options = Array.isArray(question?.options)
+      ? question.options.map((option) => sanitizeString(option, 2000))
+      : []
+    if (!text || options.length !== 4 || options.some((option) => !option)) {
+      throw new Error(`Question ${index + 1} requires text and four non-empty options.`)
+    }
+    if (!Number.isInteger(question.correctIndex) || question.correctIndex < 0 || question.correctIndex > 3) {
+      throw new Error(`Question ${index + 1} has an invalid correct answer.`)
+    }
+    const marks = Number(question.marks ?? 1)
+    if (!Number.isFinite(marks) || marks < 1 || marks > 100) {
+      throw new Error(`Question ${index + 1} marks must be between 1 and 100.`)
+    }
+    return {
+      id: sanitizeString(question.id, 100) || generateId('question'),
+      text,
+      options,
+      correctIndex: question.correctIndex,
+      marks,
+    }
+  })
+  const passMark = Number(input.passMark ?? 50)
+  if (!Number.isFinite(passMark) || passMark < 0 || passMark > 100) {
+    throw new Error('Pass mark must be between 0 and 100 percent.')
+  }
+  return {
+    id: sanitizeString(input.id, 100) || generateId('test'),
+    title,
+    code,
+    description,
+    timeLimitMinutes,
+    scheduledStart: scheduledStart.toISOString(),
+    scheduledEnd: scheduledEnd.toISOString(),
+    questions,
+    passMark,
+  }
 }
 
 function findStudent(data, registrationNumber, email) {
@@ -112,9 +251,10 @@ function findStudent(data, registrationNumber, email) {
 
 app.get('/api/tests/:id', async (req, res) => {
   const data = await readData()
-  const test = data.tests.find((t) => t.id === req.params.id)
+  const test = data.tests.find((t) => t.id === req.params.id || t.code === req.params.id)
   if (!test) return res.status(404).json({ error: 'Test not found' })
-  res.json(test)
+  // Never expose the answer key before a student submits the assessment.
+  res.json(publicTest(test))
 })
 
 app.get('/api/tests', requireAdmin, async (_req, res) => {
@@ -124,10 +264,16 @@ app.get('/api/tests', requireAdmin, async (_req, res) => {
 
 app.post('/api/tests', requireAdmin, async (req, res) => {
   const data = await readData()
-  const test = { ...req.body, id: req.body.id || generateId('test') }
-  test.title = sanitizeString(test.title, 200)
-  test.description = sanitizeString(test.description, 2000)
-  test.code = sanitizeString(test.code, 50)
+  let test
+  try {
+    test = validatedTest(req.body)
+  } catch (error) {
+    return res.status(400).json({ error: error.message })
+  }
+  const duplicateCode = data.tests.some(
+    (item) => item.id !== test.id && item.code.toLowerCase() === test.code.toLowerCase()
+  )
+  if (duplicateCode) return res.status(409).json({ error: 'Test code is already in use.' })
   const idx = data.tests.findIndex((t) => t.id === test.id)
   if (idx >= 0) data.tests[idx] = test
   else data.tests.push(test)
@@ -138,9 +284,110 @@ app.post('/api/tests', requireAdmin, async (req, res) => {
 app.delete('/api/tests/:id', requireAdmin, async (req, res) => {
   const data = await readData()
   data.tests = data.tests.filter((t) => t.id !== req.params.id)
+  data.attempts = data.attempts.filter((attempt) => attempt.testId !== req.params.id)
   await writeData(data)
   res.json({ ok: true })
 })
+
+// ─── Exam Attempts ────────────────────────────────────────────────────────────
+
+function sanitizeAnswers(answers, test) {
+  if (!Array.isArray(answers) || answers.length !== test.questions.length) return null
+  return answers.map((answer, index) => {
+    if (answer === null) return null
+    const options = test.questions[index]?.options
+    return Number.isInteger(answer) && Array.isArray(options) && answer >= 0 && answer < options.length
+      ? answer
+      : null
+  })
+}
+
+function sanitizeProctorEvents(events) {
+  return Array.isArray(events)
+    ? events.slice(-1000).map((event) => ({
+        timestamp: sanitizeString(event?.timestamp, 50),
+        message: sanitizeString(event?.message, 500),
+      })).filter((event) => event.timestamp && event.message)
+    : []
+}
+
+app.get('/api/attempts/:testId', requireStudent, async (req, res) => {
+  const data = await readData()
+  const attempt = data.attempts.find(
+    (item) => item.testId === req.params.testId && item.studentId === req.studentId && item.status === 'active'
+  )
+  res.json(attempt || null)
+})
+
+app.post('/api/attempts/start', requireStudent, serializeMutation(async (req, res) => {
+  const data = await readData()
+  if (req.body.monitoringConsent !== true) {
+    return res.status(400).json({ error: 'Monitoring consent is required before starting the exam.' })
+  }
+  const test = data.tests.find((item) => item.id === req.body.testId || item.code === req.body.testId)
+  if (!test) return res.status(404).json({ error: 'Test not found.' })
+  const now = new Date()
+  if (now < new Date(test.scheduledStart) || now > new Date(test.scheduledEnd)) {
+    return res.status(403).json({ error: 'This test is not currently within its scheduled window.' })
+  }
+  if (data.submissions.some((item) => item.testId === test.id && item.studentId === req.studentId)) {
+    return res.status(409).json({ error: 'You have already attempted this test.' })
+  }
+  const existing = data.attempts.find(
+    (item) => item.testId === test.id && item.studentId === req.studentId && item.status === 'active'
+  )
+  if (existing) return res.json(existing)
+
+  const startedAt = now.toISOString()
+  const attempt = {
+    id: generateId('attempt'),
+    testId: test.id,
+    studentId: req.studentId,
+    startedAt,
+    expiresAt: new Date(now.getTime() + (test.timeLimitMinutes + (data.students.find(
+      (student) => student.id === req.studentId
+    )?.extraTimeMinutes ?? 0)) * 60_000).toISOString(),
+    answers: test.questions.map(() => null),
+    flaggedQuestions: [],
+    currentIndex: 0,
+    proctorEvents: [],
+    lastSavedAt: startedAt,
+    monitoringConsentedAt: startedAt,
+    status: 'active',
+  }
+  data.attempts.push(attempt)
+  await writeData(data)
+  res.status(201).json(attempt)
+}))
+
+app.patch('/api/attempts/:id', requireStudent, serializeMutation(async (req, res) => {
+  const data = await readData()
+  const attempt = data.attempts.find((item) => item.id === req.params.id)
+  if (!attempt) return res.status(404).json({ error: 'Exam attempt not found.' })
+  if (attempt.studentId !== req.studentId) return res.status(403).json({ error: 'Student identity mismatch.' })
+  if (attempt.status !== 'active') return res.status(409).json({ error: 'This exam attempt is already closed.' })
+  if (Date.now() > new Date(attempt.expiresAt).getTime()) {
+    return res.status(409).json({ error: 'The exam time has expired. Submit the last saved answers.' })
+  }
+  const test = data.tests.find((item) => item.id === attempt.testId)
+  if (!test) return res.status(404).json({ error: 'Test not found.' })
+  const answers = sanitizeAnswers(req.body.answers, test)
+  if (!answers) return res.status(400).json({ error: 'Answers do not match this test.' })
+
+  attempt.answers = answers
+  attempt.flaggedQuestions = Array.isArray(req.body.flaggedQuestions)
+    ? [...new Set(req.body.flaggedQuestions.filter(
+        (index) => Number.isInteger(index) && index >= 0 && index < test.questions.length
+      ))]
+    : attempt.flaggedQuestions
+  attempt.currentIndex = Number.isInteger(req.body.currentIndex)
+    ? Math.max(0, Math.min(req.body.currentIndex, test.questions.length - 1))
+    : attempt.currentIndex
+  attempt.proctorEvents = sanitizeProctorEvents(req.body.proctorEvents)
+  attempt.lastSavedAt = new Date().toISOString()
+  await writeData(data)
+  res.json(attempt)
+}))
 
 // ─── Submissions ──────────────────────────────────────────────────────────────
 
@@ -153,34 +400,80 @@ app.get('/api/submissions', requireAdmin, async (req, res) => {
   res.json(subs)
 })
 
-app.get('/api/submissions/student', async (req, res) => {
+app.get('/api/submissions/student', requireStudent, async (req, res) => {
   const data = await readData()
   const { testId, studentId } = req.query
   if (!studentId) return res.status(400).json({ error: 'studentId required' })
+  if (studentId !== req.studentId) return res.status(403).json({ error: 'Student identity mismatch.' })
   let subs = data.submissions.filter((s) => s.studentId === studentId)
   if (testId) subs = subs.filter((s) => s.testId === testId)
-  res.json(subs)
+  res.json(subs.map((submission) => studentSubmission(data, submission)))
 })
 
-app.post('/api/submissions', async (req, res) => {
+app.post('/api/submissions', requireStudent, serializeMutation(async (req, res) => {
   const data = await readData()
-  const { testId, studentId } = req.body
+  const { testId, studentId, attemptId } = req.body
+  if (studentId !== req.studentId) return res.status(403).json({ error: 'Student identity mismatch.' })
+  const test = data.tests.find((item) => item.id === testId)
+  const student = data.students.find((item) => item.id === studentId)
+  if (!test) return res.status(404).json({ error: 'Test not found.' })
+  if (!student?.verified) return res.status(401).json({ error: 'Verified student account required.' })
+  const attempt = data.attempts.find((item) => item.id === attemptId)
+  if (!attempt || attempt.testId !== test.id || attempt.studentId !== student.id) {
+    return res.status(400).json({ error: 'A valid server-issued exam attempt is required.' })
+  }
+  if (attempt.status !== 'active') return res.status(409).json({ error: 'This exam attempt is already closed.' })
+  const submittedWithinGrace = Date.now() <= new Date(attempt.expiresAt).getTime() + 5000
+  const answers = sanitizeAnswers(submittedWithinGrace ? req.body.answers : attempt.answers, test)
+  if (!answers) {
+    return res.status(400).json({ error: 'Answers do not match this test.' })
+  }
+
   const existing = data.submissions.find(
     (s) => s.testId === testId && s.studentId === studentId
   )
   if (existing) {
     return res.status(409).json({ error: 'You have already attempted this test.' })
   }
+
+  const correctAnswers = test.questions.map((question) => question.correctIndex)
+  const score = test.questions.reduce(
+    (total, question, index) =>
+      answers[index] === question.correctIndex ? total + (question.marks ?? 1) : total,
+    0
+  )
+  const totalMarks = test.questions.reduce((total, question) => total + (question.marks ?? 1), 0)
+  const durationSeconds = Math.max(0, Math.min(
+    Math.floor((Date.now() - new Date(attempt.startedAt).getTime()) / 1000),
+    Math.floor((new Date(attempt.expiresAt).getTime() - new Date(attempt.startedAt).getTime()) / 1000)
+  ))
+  const proctorEvents = sanitizeProctorEvents(req.body.proctorEvents)
   const submission = {
-    ...req.body,
-    id: req.body.id || generateId('sub'),
-    submittedAt: req.body.submittedAt || new Date().toISOString(),
+    id: generateId('sub'),
+    testId: test.id,
+    testTitle: test.title,
+    studentId: student.id,
+    candidateName: student.fullName,
+    registrationNumber: student.registrationNumber,
+    email: student.email,
+    answers,
+    correctAnswers,
+    score,
+    totalQuestions: test.questions.length,
+    totalMarks,
+    durationSeconds,
+    submittedAt: new Date().toISOString(),
+    proctorEvents,
     active: true,
   }
   data.submissions.push(submission)
+  attempt.status = 'submitted'
+  attempt.answers = answers
+  attempt.proctorEvents = proctorEvents
+  attempt.lastSavedAt = submission.submittedAt
   await writeData(data)
-  res.json(submission)
-})
+  res.json(studentSubmission(data, submission))
+}))
 
 app.delete('/api/submissions/:id', requireAdmin, async (req, res) => {
   const data = await readData()
@@ -195,10 +488,31 @@ app.delete('/api/submissions/:id', requireAdmin, async (req, res) => {
 
 app.get('/api/students', requireAdmin, async (_req, res) => {
   const data = await readData()
-  const safe = data.students.map(({ id, fullName, registrationNumber, email, verified, createdAt }) => ({
-    id, fullName, registrationNumber, email, verified, createdAt,
+  const safe = data.students.map(({ id, fullName, registrationNumber, email, verified, createdAt, extraTimeMinutes }) => ({
+    id, fullName, registrationNumber, email, verified, createdAt, extraTimeMinutes: extraTimeMinutes ?? 0,
   }))
   res.json(safe)
+})
+
+app.patch('/api/students/:id/accommodations', requireAdmin, async (req, res) => {
+  const data = await readData()
+  const student = data.students.find((item) => item.id === req.params.id)
+  if (!student) return res.status(404).json({ error: 'Student not found.' })
+  const extraTimeMinutes = Number(req.body.extraTimeMinutes)
+  if (!Number.isInteger(extraTimeMinutes) || extraTimeMinutes < 0 || extraTimeMinutes > 240) {
+    return res.status(400).json({ error: 'Extra time must be a whole number from 0 to 240 minutes.' })
+  }
+  student.extraTimeMinutes = extraTimeMinutes
+  await writeData(data)
+  res.json({
+    id: student.id,
+    fullName: student.fullName,
+    registrationNumber: student.registrationNumber,
+    email: student.email,
+    verified: student.verified,
+    createdAt: student.createdAt,
+    extraTimeMinutes,
+  })
 })
 
 app.delete('/api/students/:id', requireAdmin, async (req, res) => {
@@ -206,6 +520,7 @@ app.delete('/api/students/:id', requireAdmin, async (req, res) => {
   const exists = data.students.find((s) => s.id === req.params.id)
   if (!exists) return res.status(404).json({ error: 'Student not found' })
   data.students = data.students.filter((s) => s.id !== req.params.id)
+  data.attempts = data.attempts.filter((attempt) => attempt.studentId !== req.params.id)
   data.submissions = data.submissions.filter((s) => s.studentId !== req.params.id)
   data.pendingVerifications = data.pendingVerifications.filter((p) => p.studentId !== req.params.id)
   await writeData(data)
@@ -302,6 +617,7 @@ app.post('/api/auth/verify', rateLimit, async (req, res) => {
       registrationNumber: student.registrationNumber,
       email: student.email,
       verified: true,
+      sessionToken: generateStudentToken(student.id),
     },
   })
 })
@@ -336,41 +652,43 @@ app.post('/api/auth/login', rateLimit, async (req, res) => {
 
   if (!student) return res.status(404).json({ error: 'Account not found. Please sign up first.' })
 
-  if (!student.verified) {
-    const code = generateCode()
-    const em = student.email.toLowerCase()
-    const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString()
-    data.pendingVerifications = data.pendingVerifications.filter((p) => p.email !== em)
-    data.pendingVerifications.push({ email: em, code, expiresAt, studentId: student.id })
-    await writeData(data)
-    const emailResult = await sendVerificationEmail(em, code)
-    return res.json({
-      requiresVerification: true,
-      message: 'Email not verified. A new code has been sent.',
-      devCode: emailResult.devCode,
-    })
-  }
-
+  const code = generateCode()
+  const em = student.email.toLowerCase()
+  const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString()
+  data.pendingVerifications = data.pendingVerifications.filter((pending) => pending.email !== em)
+  data.pendingVerifications.push({ email: em, code, expiresAt, studentId: student.id })
+  await writeData(data)
+  const emailResult = await sendVerificationEmail(em, code)
   res.json({
-    student: {
-      id: student.id,
-      fullName: student.fullName,
-      registrationNumber: student.registrationNumber,
-      email: student.email,
-      verified: true,
-    },
+    requiresVerification: true,
+    message: student.verified ? 'A sign-in code has been sent to your email.' : 'Email not verified. A verification code has been sent.',
+    devCode: emailResult.devCode,
   })
+})
+
+app.use((error, _req, res, _next) => {
+  console.error('Request failed:', error.message)
+  if (error.message?.startsWith('CORS:')) {
+    return res.status(403).json({ error: 'Origin not allowed.' })
+  }
+  res.status(500).json({ error: 'Internal server error.' })
 })
 
 // ─── Start ────────────────────────────────────────────────────────────────────
 
 async function start() {
-  await connectDB()
+  const mongoConnected = await connectDB()
+  if (process.env.NODE_ENV === 'production' && ADMIN_PASSWORD === 'admin1234') {
+    throw new Error('ADMIN_PASSWORD must be changed before starting in production.')
+  }
   app.listen(PORT, () => {
     console.log(`AcademyFlow API running on http://localhost:${PORT}`)
     console.log(`Admin password: ${ADMIN_PASSWORD === 'admin1234' ? '⚠️  Using default! Set ADMIN_PASSWORD in .env' : '✓ Custom password set'}`)
-    console.log(`MongoDB: ${process.env.MONGODB_URI ? '✓ Atlas connected' : '⚠️  No MONGODB_URI — using local data.json'}`)
+    console.log(`Storage: ${mongoConnected ? '✓ MongoDB connected' : '⚠️  Using local data.json'}`)
   })
 }
 
-start()
+start().catch((error) => {
+  console.error('AcademyFlow API failed to start:', error.message)
+  process.exitCode = 1
+})

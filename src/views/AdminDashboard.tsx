@@ -128,6 +128,11 @@ export function AdminDashboard({
     onRefresh()
   }
 
+  const handleExtraTime = async (student: Student, minutes: number) => {
+    const updated = await api.setStudentExtraTime(student.id, Math.max(0, Math.min(240, minutes)))
+    setStudents((current) => current.map((item) => item.id === updated.id ? updated : item))
+  }
+
   const handleDeleteSubmission = async (submissionId: string) => {
     if (!confirm('Delete this submission? The student will be able to retake the test.')) return
     await api.deleteSubmission(submissionId)
@@ -525,10 +530,10 @@ export function AdminDashboard({
             </div>
           ) : (
             <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
-              <table className="w-full min-w-[560px] text-left text-sm">
+              <table className="w-full min-w-[760px] text-left text-sm">
                 <thead>
                   <tr className="border-b border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800/50">
-                    {['Name', 'Reg. No.', 'Email', 'Status', 'Registered', 'Actions'].map((h) => (
+                    {['Name', 'Reg. No.', 'Email', 'Status', 'Registered', 'Extra Time', 'Actions'].map((h) => (
                       <th key={h} className="px-4 py-3 font-medium text-slate-600 dark:text-slate-400">
                         {h}
                       </th>
@@ -568,6 +573,30 @@ export function AdminDashboard({
                             ? new Date(student.createdAt).toLocaleDateString()
                             : '—'}
                           <span className="ml-2 font-mono">({subCount} sub{subCount !== 1 ? 's' : ''})</span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2 whitespace-nowrap">
+                            <span className="font-mono text-xs text-slate-600 dark:text-slate-300">
+                              +{student.extraTimeMinutes ?? 0} min
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleExtraTime(student, (student.extraTimeMinutes ?? 0) + 15)}
+                              className="rounded border border-indigo-300 px-2 py-1 text-xs text-indigo-600 hover:bg-indigo-50 dark:border-indigo-700 dark:text-indigo-300"
+                              aria-label={`Add 15 minutes for ${student.fullName}`}
+                            >
+                              +15
+                            </button>
+                            {(student.extraTimeMinutes ?? 0) > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => handleExtraTime(student, 0)}
+                                className="text-xs text-slate-500 hover:underline"
+                              >
+                                Reset
+                              </button>
+                            )}
+                          </div>
                         </td>
                         <td className="px-4 py-3">
                           <button

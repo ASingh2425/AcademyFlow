@@ -30,6 +30,8 @@ export interface Student {
   email: string
   verified: boolean
   createdAt?: string
+  sessionToken?: string
+  extraTimeMinutes?: number
 }
 
 export interface Submission {
@@ -41,6 +43,7 @@ export interface Submission {
   registrationNumber: string
   email: string
   answers: (number | null)[]
+  correctAnswers?: number[] // returned by the API only after submission
   score: number
   totalQuestions: number
   totalMarks?: number   // sum of all question marks
@@ -50,9 +53,25 @@ export interface Submission {
   active: boolean
 }
 
+export interface ExamAttempt {
+  id: string
+  testId: string
+  studentId: string
+  startedAt: string
+  expiresAt: string
+  answers: (number | null)[]
+  flaggedQuestions: number[]
+  currentIndex: number
+  proctorEvents: ProctorEvent[]
+  lastSavedAt: string
+  monitoringConsentedAt: string
+  status: 'active' | 'submitted'
+}
+
 export type AppView = 'student' | 'exam' | 'results' | 'admin' | 'builder'
 
 export interface ExamSession {
+  attemptId: string
   testId: string
   studentId: string
   candidateName: string
@@ -62,6 +81,7 @@ export interface ExamSession {
   flaggedQuestions: number[]   // indices of flagged questions
   currentIndex: number
   startedAt: number
+  expiresAt: number
   proctorEvents: ProctorEvent[]
 }
 

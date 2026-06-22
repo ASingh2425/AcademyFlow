@@ -4,6 +4,7 @@ services:
     runtime: node
     buildCommand: npm install
     startCommand: node server/index.mjs
+    healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
         value: production

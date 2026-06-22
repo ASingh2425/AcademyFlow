@@ -7,9 +7,9 @@ import {
   Loader2,
   LogOut,
   Play,
-  Shield,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { ExamPreflight } from '../components/ExamPreflight'
 import { Modal } from '../components/Modal'
 import { useStudent } from '../context/StudentContext'
 import { api } from '../lib/api'
@@ -18,12 +18,12 @@ import {
   getScheduleMessage,
   getScheduleStatus,
 } from '../lib/schedule'
-import type { Submission, Test } from '../types'
+import type { ExamAttempt, Submission, Test } from '../types'
 import { StudentAuthView } from './StudentAuthView'
 
 interface StudentTestViewProps {
   testId: string
-  onStartTest: (test: Test) => void
+  onStartTest: (test: Test, attempt: ExamAttempt) => void
   onViewResults: (submission: Submission, test: Test) => void
 }
 
@@ -31,6 +31,7 @@ export function StudentTestView({ testId, onStartTest, onViewResults }: StudentT
   const { student, logout } = useStudent()
   const [test, setTest] = useState<Test | null>(null)
   const [existingSubmission, setExistingSubmission] = useState<Submission | null>(null)
+  const [existingAttempt, setExistingAttempt] = useState<ExamAttempt | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [confirmOpen, setConfirmOpen] = useState(false)
@@ -51,8 +52,14 @@ export function StudentTestView({ testId, onStartTest, onViewResults }: StudentT
         if (cancelled) return
         setTest(t)
         if (student) {
-          const subs = await api.getStudentSubmissions({ testId, studentId: student.id })
-          if (!cancelled && subs.length > 0) setExistingSubmission(subs[0])
+          const [subs, attempt] = await Promise.all([
+            api.getStudentSubmissions({ testId, studentId: student.id }),
+            api.getAttempt(t.id),
+          ])
+          if (!cancelled) {
+            setExistingSubmission(subs[0] ?? null)
+            setExistingAttempt(attempt)
+          }
         }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load test.')
@@ -91,7 +98,7 @@ export function StudentTestView({ testId, onStartTest, onViewResults }: StudentT
   }
 
   const scheduleStatus = getScheduleStatus(test, now)
-  const canStart = scheduleStatus === 'open' && !existingSubmission
+  const canStart = !existingSubmission && (scheduleStatus === 'open' || Boolean(existingAttempt))
 
   return (
     <div className="animate-fade-in mx-auto max-w-2xl px-4 py-8 sm:px-6">
@@ -173,7 +180,9 @@ export function StudentTestView({ testId, onStartTest, onViewResults }: StudentT
             className="mt-6 flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-500 py-3 font-medium text-white transition-colors duration-200 hover:bg-indigo-600 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Play className="h-4 w-4" />
-            {scheduleStatus === 'upcoming'
+            {existingAttempt
+              ? 'Resume Saved Attempt'
+              : scheduleStatus === 'upcoming'
               ? 'Not Yet Available'
               : scheduleStatus === 'closed'
                 ? 'Window Closed'
@@ -182,30 +191,16 @@ export function StudentTestView({ testId, onStartTest, onViewResults }: StudentT
         )}
       </div>
 
-      <Modal open={confirmOpen} onClose={() => setConfirmOpen(false)} title="Begin Assessment">
-        <div className="space-y-4">
-          <div className="flex gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4 dark:border-amber-700 dark:bg-amber-950/30">
-            <Shield className="h-5 w-5 shrink-0 text-amber-600" />
-            <p className="text-xs text-amber-800 dark:text-amber-300">
-              Active proctoring is enabled. Tab switches and focus loss will be logged. You may only
-              attempt this test once.
-            </p>
-          </div>
-          <p className="text-sm text-slate-600 dark:text-slate-400">
-            Ready to begin <strong>{test.title}</strong>? The {test.timeLimitMinutes}-minute timer
-            starts immediately.
-          </p>
-          <button
-            type="button"
-            onClick={() => {
-              setConfirmOpen(false)
-              onStartTest(test)
-            }}
-            className="w-full rounded-lg bg-indigo-500 py-3 font-medium text-white hover:bg-indigo-600"
-          >
-            Begin Now
-          </button>
-        </div>
+      <Modal open={confirmOpen} onClose={() => setConfirmOpen(false)} title="Exam Readiness Check" wide>
+        <ExamPreflight
+          apiBaseUrl={(import.meta.env.VITE_API_URL as string) || '/api'}
+          onEnter={async () => {
+            const attempt = existingAttempt ?? await api.startAttempt(test.id)
+            setExistingAttempt(attempt)
+            setConfirmOpen(false)
+            onStartTest(test, attempt)
+          }}
+        />
       </Modal>
     </div>
   )

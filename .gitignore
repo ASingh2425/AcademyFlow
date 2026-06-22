@@ -28,3 +28,6 @@ dist-ssr
 
 # Live database — don't commit server data
 server/data.json
+
+# Local scratch files
+query

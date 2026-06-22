@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from 'react'
+import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react'
 import type { Student } from '../types'
 
 const SESSION_KEY = 'academyflow_student_session'
@@ -30,6 +30,12 @@ export function StudentProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const logout = useCallback(() => setStudent(null), [setStudent])
+
+  useEffect(() => {
+    const expireSession = () => setStudentState(null)
+    window.addEventListener('academyflow:student-session-expired', expireSession)
+    return () => window.removeEventListener('academyflow:student-session-expired', expireSession)
+  }, [])
 
   return (
     <StudentContext.Provider value={{ student, setStudent, logout }}>

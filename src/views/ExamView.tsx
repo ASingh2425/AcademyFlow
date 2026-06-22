@@ -1,7 +1,10 @@
 import { AlertTriangle, ChevronLeft, ChevronRight, Flag, Send, Shield } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Modal } from '../components/Modal'
+import { CameraProctor } from '../components/CameraProctor'
+import { AIProctorMonitor } from '../components/AIProctorMonitor'
 import { useProctoring } from '../hooks/useProctoring'
+import { api } from '../lib/api'
 import { formatTimeRemaining } from '../lib/scoring'
 import type { Dispatch, SetStateAction } from 'react'
 import type { ExamSession, ProctorEvent, Test } from '../types'
@@ -16,10 +19,14 @@ interface ExamViewProps {
 }
 
 export function ExamView({ test, session, onUpdateSession, onSubmit }: ExamViewProps) {
-  const totalSeconds = test.timeLimitMinutes * 60
-  const elapsed = Math.floor((Date.now() - session.startedAt) / 1000)
-  const [remaining, setRemaining] = useState(Math.max(0, totalSeconds - elapsed))
+  const [remaining, setRemaining] = useState(
+    Math.max(0, Math.floor((session.expiresAt - Date.now()) / 1000))
+  )
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [saveStatus, setSaveStatus] = useState<'saving' | 'saved' | 'offline'>('saved')
+  const latestSessionRef = useRef(session)
+  latestSessionRef.current = session
+  const videoRef = useRef<HTMLVideoElement>(null)
 
   const addProctorEvent = useCallback(
     (event: ProctorEvent) => {
@@ -30,9 +37,26 @@ export function ExamView({ test, session, onUpdateSession, onSubmit }: ExamViewP
     [onUpdateSession]
   )
 
+  const handleVideoRef = useCallback((ref: React.RefObject<HTMLVideoElement | null>) => {
+    videoRef.current = ref.current
+  }, [])
+
+  const handleMediaEvent = useCallback((message: string) => {
+    addProctorEvent({
+      timestamp: new Date().toISOString(),
+      message: `Media Proctor: ${message}`,
+    })
+  }, [addProctorEvent])
+
   useProctoring(true, addProctorEvent)
 
   const submittedRef = useRef(false)
+
+  const submitOnce = useCallback((currentSession: ExamSession) => {
+    if (submittedRef.current) return
+    submittedRef.current = true
+    onSubmit(currentSession)
+  }, [onSubmit])
 
   useEffect(() => {
     submittedRef.current = false
@@ -40,18 +64,27 @@ export function ExamView({ test, session, onUpdateSession, onSubmit }: ExamViewP
 
   useEffect(() => {
     const tick = () => {
-      const elapsedNow = Math.floor((Date.now() - session.startedAt) / 1000)
-      const left = Math.max(0, totalSeconds - elapsedNow)
+      const left = Math.max(0, Math.floor((session.expiresAt - Date.now()) / 1000))
       setRemaining(left)
       if (left <= 0 && !submittedRef.current) {
-        submittedRef.current = true
-        onSubmit(session)
+        submitOnce(latestSessionRef.current)
       }
     }
     tick()
     const id = setInterval(tick, 1000)
     return () => clearInterval(id)
-  }, [session, totalSeconds, onSubmit])
+  }, [session.expiresAt, submitOnce])
+
+  useEffect(() => {
+    if (submittedRef.current) return
+    setSaveStatus('saving')
+    const timeout = window.setTimeout(() => {
+      api.saveAttempt(session)
+        .then(() => setSaveStatus('saved'))
+        .catch(() => setSaveStatus('offline'))
+    }, 750)
+    return () => window.clearTimeout(timeout)
+  }, [session])
 
   const currentQ = test.questions[session.currentIndex]
   const selected = session.answers[session.currentIndex]
@@ -100,6 +133,9 @@ export function ExamView({ test, session, onUpdateSession, onSubmit }: ExamViewP
             <h2 className="font-semibold text-slate-900 dark:text-white">{test.title}</h2>
             <p className="text-sm text-slate-500 dark:text-slate-400">
               Candidate: {session.candidateName}
+            </p>
+            <p aria-live="polite" className={`text-xs ${saveStatus === 'offline' ? 'text-red-500' : 'text-slate-400'}`}>
+              {saveStatus === 'saving' ? 'Saving progress…' : saveStatus === 'saved' ? 'Progress saved' : 'Offline — retrying on next change'}
             </p>
           </div>
           <div className="text-right">
@@ -203,6 +239,20 @@ export function ExamView({ test, session, onUpdateSession, onSubmit }: ExamViewP
 
       {/* Sidebar */}
       <aside className="w-full space-y-4 lg:w-72">
+        {/* Camera Proctoring */}
+        <div className="rounded-xl border border-indigo-500 bg-gradient-to-br from-indigo-50/50 to-indigo-50/30 p-4 dark:border-indigo-400 dark:from-indigo-950/40 dark:to-indigo-950/20">
+          <CameraProctor active onVideoRef={handleVideoRef} onMediaEvent={handleMediaEvent} />
+        </div>
+
+        {/* AI Proctoring Monitor */}
+        <div className="rounded-xl border border-violet-500 bg-gradient-to-br from-violet-50/50 to-violet-50/30 p-4 dark:border-violet-400 dark:from-violet-950/40 dark:to-violet-950/20">
+          <AIProctorMonitor
+            videoRef={videoRef}
+            active={true}
+            onProctorEvent={addProctorEvent}
+          />
+        </div>
+
         {/* Session integrity */}
         <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
           <div className="mb-3 flex items-center gap-2">
@@ -339,7 +389,7 @@ export function ExamView({ test, session, onUpdateSession, onSubmit }: ExamViewP
               type="button"
               onClick={() => {
                 setConfirmOpen(false)
-                onSubmit(session)
+                submitOnce(session)
               }}
               className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-emerald-600 py-2.5 text-sm font-medium text-white transition-colors duration-200 hover:bg-emerald-700"
             >

@@ -7,6 +7,7 @@ import {
   Shield,
   Timer,
   Users,
+  Zap,
 } from 'lucide-react'
 
 const features = [
@@ -21,12 +22,21 @@ const features = [
   },
   {
     icon: Shield,
-    title: 'Active Proctoring',
+    title: 'Fully Proctored Exams',
     description:
-      'Automatic integrity monitoring: tab switches, copy-paste, right-click, and keyboard shortcuts are all flagged.',
+      'Live video & microphone monitoring combined with automatic integrity checks: tab switches, copy-paste, right-click, and keyboard shortcuts are all flagged.',
     color: 'from-emerald-500 to-teal-500',
     bg: 'bg-emerald-50 dark:bg-emerald-950/30',
     border: 'border-emerald-100 dark:border-emerald-900/50',
+  },
+  {
+    icon: Zap,
+    title: 'AI Proctor',
+    description:
+      '🤖 Real-time AI analysis: Face detection, eye gaze tracking, multiple people detection, and behavior analysis — all processed locally in the browser for complete privacy.',
+    color: 'from-violet-500 to-fuchsia-500',
+    bg: 'bg-violet-50 dark:bg-violet-950/30',
+    border: 'border-violet-100 dark:border-violet-900/50',
   },
   {
     icon: Lock,
