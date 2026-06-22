@@ -42,6 +42,26 @@
   .timer-danger {
     animation: timer-pulse-danger 0.8s ease-in-out infinite;
   }
+
+  .exam-mode {
+    @apply select-none;
+  }
+  
+  .exam-mode * {
+    -webkit-touch-callout: none; /* iOS Safari */
+    -webkit-user-select: none; /* Safari */
+     -khtml-user-select: none; /* Konqueror HTML */
+       -moz-user-select: none; /* Old versions of Firefox */
+        -ms-user-select: none; /* Internet Explorer/Edge */
+            user-select: none; /* Non-prefixed version */
+  }
+
+  /* Allow inputs/textareas to still be selectable if needed (like the code editor) */
+  .exam-mode input, .exam-mode textarea, .exam-mode [contenteditable="true"], .exam-mode .monaco-editor {
+    @apply select-auto;
+    -webkit-user-select: auto;
+    user-select: auto;
+  }
 }
 
 @keyframes fade-in {

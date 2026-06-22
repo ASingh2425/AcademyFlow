@@ -1,12 +1,12 @@
-import { CheckCircle2, ChevronDown, XCircle } from 'lucide-react'
+import { CheckCircle2, ChevronDown, XCircle, Code2 } from 'lucide-react'
 import { useState } from 'react'
-import type { Question } from '../types'
+import type { Question, Answer } from '../types'
 
 const LABELS = ['A', 'B', 'C', 'D'] as const
 
 interface QuestionReviewProps {
   questions: Question[]
-  answers: (number | null)[]
+  answers: Answer[]
 }
 
 export function QuestionReview({ questions, answers }: QuestionReviewProps) {
@@ -20,7 +20,8 @@ export function QuestionReview({ questions, answers }: QuestionReviewProps) {
     <div className="space-y-2">
       {questions.map((q, idx) => {
         const selected = answers[idx]
-        const isCorrect = selected === q.correctIndex
+        // We only show simple visual check for MCQ here, coding evaluation needs backend scores
+        const isCorrect = q.type === 'coding' ? false : selected === q.correctIndex
         const isOpen = expanded[q.id] ?? false
 
         return (
@@ -33,7 +34,9 @@ export function QuestionReview({ questions, answers }: QuestionReviewProps) {
               onClick={() => toggle(q.id)}
               className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors duration-200 hover:bg-slate-50 dark:hover:bg-slate-800/50"
             >
-              {isCorrect ? (
+              {q.type === 'coding' ? (
+                <Code2 className="h-5 w-5 shrink-0 text-slate-400" />
+              ) : isCorrect ? (
                 <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-500" />
               ) : (
                 <XCircle className="h-5 w-5 shrink-0 text-red-400" />
@@ -47,34 +50,43 @@ export function QuestionReview({ questions, answers }: QuestionReviewProps) {
             </button>
             {isOpen && (
               <div className="animate-fade-in border-t border-slate-100 px-4 py-3 dark:border-slate-800">
-                <div className="space-y-2">
-                  {q.options.map((opt, oi) => {
-                    const isSelected = selected === oi
-                    const isAnswer = q.correctIndex === oi
-                    let cls =
-                      'rounded-lg border px-3 py-2 text-sm border-slate-200 text-slate-600 dark:border-slate-700 dark:text-slate-400'
-                    if (isAnswer) {
-                      cls =
-                        'rounded-lg border px-3 py-2 text-sm border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
-                    } else if (isSelected && !isCorrect) {
-                      cls =
-                        'rounded-lg border px-3 py-2 text-sm border-red-300 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300'
-                    }
-                    return (
-                      <div key={oi} className={cls}>
-                        <span className="font-mono font-semibold">{LABELS[oi]}.</span> {opt}
-                        {isAnswer && (
-                          <span className="ml-2 text-xs font-medium text-emerald-600 dark:text-emerald-400">
-                            (Correct)
-                          </span>
-                        )}
-                        {isSelected && !isAnswer && (
-                          <span className="ml-2 text-xs font-medium text-red-500">(Your choice)</span>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
+                {q.type === 'coding' ? (
+                   <div className="space-y-2">
+                     <p className="text-sm font-medium text-slate-600 dark:text-slate-400">Your Submitted Code:</p>
+                     <pre className="rounded bg-slate-50 p-3 text-xs font-mono text-slate-800 overflow-x-auto dark:bg-slate-950 dark:text-slate-300">
+                       {typeof selected === 'object' && selected !== null ? selected.code : 'No code submitted.'}
+                     </pre>
+                   </div>
+                ) : (
+                  <div className="space-y-2">
+                    {(q.options || []).map((opt, oi) => {
+                      const isSelected = selected === oi
+                      const isAnswer = q.correctIndex === oi
+                      let cls =
+                        'rounded-lg border px-3 py-2 text-sm border-slate-200 text-slate-600 dark:border-slate-700 dark:text-slate-400'
+                      if (isAnswer) {
+                        cls =
+                          'rounded-lg border px-3 py-2 text-sm border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
+                      } else if (isSelected && !isCorrect) {
+                        cls =
+                          'rounded-lg border px-3 py-2 text-sm border-red-300 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300'
+                      }
+                      return (
+                        <div key={oi} className={cls}>
+                          <span className="font-mono font-semibold">{LABELS[oi]}.</span> {opt}
+                          {isAnswer && (
+                            <span className="ml-2 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                              (Correct)
+                            </span>
+                          )}
+                          {isSelected && !isAnswer && (
+                            <span className="ml-2 text-xs font-medium text-red-500">(Your choice)</span>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
             )}
           </div>

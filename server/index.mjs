@@ -168,6 +168,11 @@ function publicTest(test) {
       ? test.questions.map(({ correctIndex: _correctIndex, ...question }) => ({
           ...question,
           correctIndex: -1,
+          testCases: Array.isArray(question.testCases)
+            ? question.testCases.map((tc) =>
+                tc.isHidden ? { isHidden: true, input: 'Hidden Test Case', expectedOutput: 'Hidden Expected Output' } : tc
+              )
+            : undefined,
         }))
       : [],
   }
@@ -201,25 +206,49 @@ function validatedTest(input) {
   }
   const questions = input.questions.map((question, index) => {
     const text = sanitizeString(question?.text, 4000)
-    const options = Array.isArray(question?.options)
-      ? question.options.map((option) => sanitizeString(option, 2000))
-      : []
-    if (!text || options.length !== 4 || options.some((option) => !option)) {
-      throw new Error(`Question ${index + 1} requires text and four non-empty options.`)
-    }
-    if (!Number.isInteger(question.correctIndex) || question.correctIndex < 0 || question.correctIndex > 3) {
-      throw new Error(`Question ${index + 1} has an invalid correct answer.`)
-    }
+    if (!text) throw new Error(`Question ${index + 1} requires text.`)
+    const type = question?.type === 'coding' ? 'coding' : 'mcq'
     const marks = Number(question.marks ?? 1)
     if (!Number.isFinite(marks) || marks < 1 || marks > 100) {
       throw new Error(`Question ${index + 1} marks must be between 1 and 100.`)
     }
-    return {
-      id: sanitizeString(question.id, 100) || generateId('question'),
-      text,
-      options,
-      correctIndex: question.correctIndex,
-      marks,
+    
+    if (type === 'mcq') {
+      const options = Array.isArray(question?.options)
+        ? question.options.map((option) => sanitizeString(option, 2000))
+        : []
+      if (options.length !== 4 || options.some((option) => !option)) {
+        throw new Error(`Question ${index + 1} requires four non-empty options.`)
+      }
+      if (!Number.isInteger(question.correctIndex) || question.correctIndex < 0 || question.correctIndex > 3) {
+        throw new Error(`Question ${index + 1} has an invalid correct answer.`)
+      }
+      return {
+        id: sanitizeString(question.id, 100) || generateId('question'),
+        type,
+        text,
+        options,
+        correctIndex: question.correctIndex,
+        marks,
+      }
+    } else {
+      // Coding
+      const allowedLanguages = Array.isArray(question?.allowedLanguages) ? question.allowedLanguages.map(l => sanitizeString(l, 50)) : ['python', 'javascript']
+      const starterCode = question?.starterCode && typeof question.starterCode === 'object' ? question.starterCode : {}
+      const testCases = Array.isArray(question?.testCases) ? question.testCases.map(tc => ({
+        input: String(tc.input || ''),
+        expectedOutput: String(tc.expectedOutput || ''),
+        isHidden: Boolean(tc.isHidden)
+      })) : []
+      return {
+        id: sanitizeString(question.id, 100) || generateId('question'),
+        type,
+        text,
+        marks,
+        allowedLanguages,
+        starterCode,
+        testCases,
+      }
     }
   })
   const passMark = Number(input.passMark ?? 50)
@@ -295,7 +324,14 @@ function sanitizeAnswers(answers, test) {
   if (!Array.isArray(answers) || answers.length !== test.questions.length) return null
   return answers.map((answer, index) => {
     if (answer === null) return null
-    const options = test.questions[index]?.options
+    const question = test.questions[index]
+    if (question?.type === 'coding') {
+      if (typeof answer === 'object' && answer !== null && typeof answer.code === 'string' && typeof answer.language === 'string') {
+        return { code: sanitizeString(answer.code, 100000), language: sanitizeString(answer.language, 50) }
+      }
+      return null
+    }
+    const options = question?.options
     return Number.isInteger(answer) && Array.isArray(options) && answer >= 0 && answer < options.length
       ? answer
       : null
@@ -436,12 +472,51 @@ app.post('/api/submissions', requireStudent, serializeMutation(async (req, res) 
     return res.status(409).json({ error: 'You have already attempted this test.' })
   }
 
-  const correctAnswers = test.questions.map((question) => question.correctIndex)
-  const score = test.questions.reduce(
-    (total, question, index) =>
-      answers[index] === question.correctIndex ? total + (question.marks ?? 1) : total,
-    0
-  )
+  const correctAnswers = test.questions.map((question) => question.correctIndex ?? null)
+  
+  // Grade coding questions synchronously (may take a few seconds)
+  let score = 0;
+  for (let index = 0; index < test.questions.length; index++) {
+    const question = test.questions[index];
+    const answer = answers[index];
+    
+    if (question.type === 'coding' && answer && typeof answer === 'object') {
+      let passedAll = true;
+      if (Array.isArray(question.testCases)) {
+        for (const tc of question.testCases) {
+          try {
+            const res = await fetch('https://emkc.org/api/v2/piston/execute', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                language: answer.language,
+                version: '*', // uses latest
+                files: [{ content: answer.code }],
+                stdin: tc.input
+              })
+            });
+            const out = await res.json();
+            const output = (out.run?.stdout || out.run?.output || '').trim();
+            if (output !== tc.expectedOutput.trim()) {
+              passedAll = false;
+              break;
+            }
+          } catch (e) {
+            passedAll = false;
+            break;
+          }
+        }
+      } else {
+        passedAll = false;
+      }
+      if (passedAll) score += (question.marks ?? 1);
+    } else {
+      // MCQ
+      if (answer === question.correctIndex) {
+        score += (question.marks ?? 1);
+      }
+    }
+  }
   const totalMarks = test.questions.reduce((total, question) => total + (question.marks ?? 1), 0)
   const durationSeconds = Math.max(0, Math.min(
     Math.floor((Date.now() - new Date(attempt.startedAt).getTime()) / 1000),

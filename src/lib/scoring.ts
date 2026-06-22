@@ -1,10 +1,11 @@
-import type { Question } from '../types'
+import type { Question, Answer } from '../types'
 
 export function calculateScore(
   questions: Question[],
-  answers: (number | null)[]
+  answers: Answer[]
 ): number {
   return questions.reduce((acc, q, i) => {
+    if (q.type === 'coding') return acc // backend calculates coding score
     return answers[i] === q.correctIndex ? acc + (q.marks ?? 1) : acc
   }, 0)
 }

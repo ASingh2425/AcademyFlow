@@ -1,9 +1,23 @@
+export type QuestionType = 'mcq' | 'coding'
+
+export interface TestCase {
+  input: string
+  expectedOutput: string
+  isHidden: boolean
+}
+
 export interface Question {
   id: string
+  type?: QuestionType // Optional for backwards compatibility, defaults to 'mcq'
   text: string
-  options: [string, string, string, string]
-  correctIndex: number
-  marks?: number        // per-question weightage (default 1)
+  marks?: number
+  // MCQ
+  options?: [string, string, string, string]
+  correctIndex?: number
+  // Coding
+  allowedLanguages?: string[]
+  starterCode?: Record<string, string>
+  testCases?: TestCase[]
 }
 
 export interface Test {
@@ -15,7 +29,7 @@ export interface Test {
   scheduledStart: string
   scheduledEnd: string
   questions: Question[]
-  passMark?: number     // pass threshold as percentage 0–100 (default 50)
+  passMark?: number
 }
 
 export interface ProctorEvent {
@@ -34,6 +48,8 @@ export interface Student {
   extraTimeMinutes?: number
 }
 
+export type Answer = number | { code: string; language: string } | null
+
 export interface Submission {
   id: string
   testId: string
@@ -42,11 +58,11 @@ export interface Submission {
   candidateName: string
   registrationNumber: string
   email: string
-  answers: (number | null)[]
-  correctAnswers?: number[] // returned by the API only after submission
+  answers: Answer[]
+  correctAnswers?: (number | null)[] 
   score: number
   totalQuestions: number
-  totalMarks?: number   // sum of all question marks
+  totalMarks?: number
   durationSeconds: number
   submittedAt: string
   proctorEvents: ProctorEvent[]
@@ -59,7 +75,7 @@ export interface ExamAttempt {
   studentId: string
   startedAt: string
   expiresAt: string
-  answers: (number | null)[]
+  answers: Answer[]
   flaggedQuestions: number[]
   currentIndex: number
   proctorEvents: ProctorEvent[]
@@ -77,8 +93,8 @@ export interface ExamSession {
   candidateName: string
   registrationNumber: string
   email: string
-  answers: (number | null)[]
-  flaggedQuestions: number[]   // indices of flagged questions
+  answers: Answer[]
+  flaggedQuestions: number[]
   currentIndex: number
   startedAt: number
   expiresAt: number
@@ -87,10 +103,16 @@ export interface ExamSession {
 
 export interface BuilderQuestion {
   id: string
+  type: QuestionType
   text: string
-  options: [string, string, string, string]
-  correctIndex: number | null
-  marks: number   // default 1
+  marks: number
+  // MCQ
+  options?: [string, string, string, string]
+  correctIndex?: number | null
+  // Coding
+  allowedLanguages?: string[]
+  starterCode?: Record<string, string>
+  testCases?: TestCase[]
 }
 
 export type ScheduleStatus = 'upcoming' | 'open' | 'closed'

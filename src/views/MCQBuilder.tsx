@@ -6,9 +6,13 @@ import {
   Plus,
   Save,
   Trash2,
+  Code2,
+  List,
+  Eye,
+  EyeOff
 } from 'lucide-react'
 import { useState } from 'react'
-import type { BuilderQuestion, Test } from '../types'
+import type { BuilderQuestion, Test, QuestionType, TestCase } from '../types'
 import { generateId } from '../lib/storage'
 
 const LABELS = ['A', 'B', 'C', 'D'] as const
@@ -30,9 +34,21 @@ function defaultEndFromStart(startLocal: string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-function emptyQuestion(): BuilderQuestion {
+function emptyQuestion(type: QuestionType = 'mcq'): BuilderQuestion {
+  if (type === 'coding') {
+    return {
+      id: generateId('bq'),
+      type: 'coding',
+      text: '',
+      marks: 10,
+      allowedLanguages: ['python', 'javascript'],
+      starterCode: { python: 'def solve():\n    pass', javascript: 'function solve() {\n\n}' },
+      testCases: [{ input: '', expectedOutput: '', isHidden: false }],
+    }
+  }
   return {
     id: generateId('bq'),
+    type: 'mcq',
     text: '',
     options: ['', '', '', ''],
     correctIndex: null,
@@ -62,10 +78,14 @@ export function MCQBuilder({ editingTest, onSave, onCancel }: MCQBuilderProps) {
     editingTest
       ? editingTest.questions.map((q) => ({
           id: q.id,
+          type: q.type || 'mcq',
           text: q.text,
-          options: [...q.options] as [string, string, string, string],
+          options: q.options ? [...q.options] as [string, string, string, string] : undefined,
           correctIndex: q.correctIndex,
           marks: q.marks ?? 1,
+          allowedLanguages: q.allowedLanguages,
+          starterCode: q.starterCode,
+          testCases: q.testCases ? [...q.testCases] : undefined,
         }))
       : [emptyQuestion()]
   )
@@ -74,7 +94,7 @@ export function MCQBuilder({ editingTest, onSave, onCancel }: MCQBuilderProps) {
 
   const totalMarks = questions.reduce((s, q) => s + (q.marks ?? 1), 0)
   const recommendedMax = Math.floor(timeLimit * 1.5)
-  const tooManyQuestions = questions.length > recommendedMax
+  const tooManyQuestions = questions.filter(q => q.type === 'mcq').length > recommendedMax
 
   const updateQuestion = (id: string, patch: Partial<BuilderQuestion>) => {
     setQuestions((prev) => prev.map((q) => (q.id === id ? { ...q, ...patch } : q)))
@@ -84,7 +104,7 @@ export function MCQBuilder({ editingTest, onSave, onCancel }: MCQBuilderProps) {
     setQuestions((prev) =>
       prev.map((q) => {
         if (q.id !== qId) return q
-        const opts = [...q.options] as [string, string, string, string]
+        const opts = [...(q.options || ['', '', '', ''])] as [string, string, string, string]
         opts[optIndex] = value
         return { ...q, options: opts }
       })
@@ -104,6 +124,32 @@ export function MCQBuilder({ editingTest, onSave, onCancel }: MCQBuilderProps) {
     setQuestions((prev) => prev.filter((q) => q.id !== id))
   }
 
+  const addTestCase = (qId: string) => {
+    setQuestions((prev) => prev.map((q) => {
+      if (q.id !== qId) return q
+      const testCases = [...(q.testCases || []), { input: '', expectedOutput: '', isHidden: false }]
+      return { ...q, testCases }
+    }))
+  }
+
+  const updateTestCase = (qId: string, tcIndex: number, patch: Partial<TestCase>) => {
+    setQuestions((prev) => prev.map((q) => {
+      if (q.id !== qId) return q
+      const testCases = [...(q.testCases || [])]
+      testCases[tcIndex] = { ...testCases[tcIndex], ...patch }
+      return { ...q, testCases }
+    }))
+  }
+
+  const removeTestCase = (qId: string, tcIndex: number) => {
+    setQuestions((prev) => prev.map((q) => {
+      if (q.id !== qId) return q
+      const testCases = [...(q.testCases || [])]
+      testCases.splice(tcIndex, 1)
+      return { ...q, testCases }
+    }))
+  }
+
   const validate = (): string[] => {
     const errs: string[] = []
     if (!title.trim()) errs.push('Test title is required.')
@@ -117,11 +163,22 @@ export function MCQBuilder({ editingTest, onSave, onCancel }: MCQBuilderProps) {
     if (questions.length === 0) errs.push('At least one question is required.')
     questions.forEach((q, i) => {
       if (!q.text.trim()) errs.push(`Question ${i + 1}: scenario text is required.`)
-      q.options.forEach((opt, oi) => {
-        if (!opt.trim()) errs.push(`Question ${i + 1}: option ${LABELS[oi]} is required.`)
-      })
-      if (q.correctIndex === null) errs.push(`Question ${i + 1}: select the correct answer.`)
       if ((q.marks ?? 1) < 1) errs.push(`Question ${i + 1}: marks must be at least 1.`)
+      
+      if (q.type === 'mcq') {
+        q.options?.forEach((opt, oi) => {
+          if (!opt.trim()) errs.push(`Question ${i + 1}: option ${LABELS[oi]} is required.`)
+        })
+        if (q.correctIndex === null || q.correctIndex === undefined) errs.push(`Question ${i + 1}: select the correct answer.`)
+      } else {
+        if (!q.testCases || q.testCases.length === 0) {
+          errs.push(`Question ${i + 1}: at least one test case is required.`)
+        } else {
+          q.testCases.forEach((tc, ti) => {
+            if (!tc.input.trim() && !tc.expectedOutput.trim()) errs.push(`Question ${i + 1}: test case ${ti + 1} is empty.`)
+          })
+        }
+      }
     })
     return errs
   }
@@ -145,13 +202,31 @@ export function MCQBuilder({ editingTest, onSave, onCancel }: MCQBuilderProps) {
       passMark,
       scheduledStart: new Date(scheduledStart).toISOString(),
       scheduledEnd: new Date(scheduledEnd).toISOString(),
-      questions: questions.map((q) => ({
-        id: q.id,
-        text: q.text.trim(),
-        options: q.options.map((o) => o.trim()) as [string, string, string, string],
-        correctIndex: q.correctIndex!,
-        marks: q.marks ?? 1,
-      })),
+      questions: questions.map((q) => {
+        if (q.type === 'mcq') {
+          return {
+            id: q.id,
+            type: 'mcq',
+            text: q.text.trim(),
+            options: q.options?.map((o) => o.trim()) as [string, string, string, string],
+            correctIndex: q.correctIndex!,
+            marks: q.marks ?? 1,
+          }
+        }
+        return {
+          id: q.id,
+          type: 'coding',
+          text: q.text.trim(),
+          marks: q.marks ?? 10,
+          allowedLanguages: q.allowedLanguages || ['python', 'javascript'],
+          starterCode: q.starterCode || {},
+          testCases: (q.testCases || []).map((tc) => ({
+            input: tc.input.trim(),
+            expectedOutput: tc.expectedOutput.trim(),
+            isHidden: tc.isHidden
+          }))
+        }
+      }),
     }
     onSave(test)
   }
@@ -168,10 +243,10 @@ export function MCQBuilder({ editingTest, onSave, onCancel }: MCQBuilderProps) {
         </button>
         <div>
           <h2 className="text-2xl font-bold text-slate-900 dark:text-white">
-            {editingTest ? 'Edit Assessment' : 'MCQ Builder'}
+            {editingTest ? 'Edit Assessment' : 'Assessment Builder'}
           </h2>
           <p className="text-sm text-slate-600 dark:text-slate-400">
-            Configure metadata and scenario stack
+            Configure metadata and assessment questions
           </p>
         </div>
       </div>
@@ -277,31 +352,40 @@ export function MCQBuilder({ editingTest, onSave, onCancel }: MCQBuilderProps) {
           <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
           <div>
             <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">
-              Too many questions for the time limit
+              Too many MCQ questions for the time limit
             </p>
             <p className="mt-0.5 text-xs text-amber-700 dark:text-amber-400">
-              {questions.length} questions in {timeLimit} minutes leaves only ~{Math.floor((timeLimit * 60) / questions.length)}s per question.
-              Recommended max: <strong>{recommendedMax}</strong> questions.
+              Consider increasing the time limit or reducing the number of questions.
             </p>
           </div>
         </div>
       )}
 
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Scenario Stack</h3>
+          <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Questions</h3>
           <p className="text-xs text-slate-500 dark:text-slate-400">
             {questions.length} question{questions.length !== 1 ? 's' : ''} · {totalMarks} total mark{totalMarks !== 1 ? 's' : ''}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => setQuestions((prev) => [...prev, emptyQuestion()])}
-          className="flex items-center gap-1 rounded-lg border border-indigo-300 px-3 py-2 text-sm font-medium text-indigo-600 transition-colors duration-200 hover:bg-indigo-50 dark:border-indigo-700 dark:text-indigo-400 dark:hover:bg-indigo-950/30"
-        >
-          <Plus className="h-4 w-4" />
-          Add Scenario
-        </button>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setQuestions((prev) => [...prev, emptyQuestion('mcq')])}
+            className="flex items-center gap-1 rounded-lg border border-indigo-300 px-3 py-2 text-sm font-medium text-indigo-600 transition-colors duration-200 hover:bg-indigo-50 dark:border-indigo-700 dark:text-indigo-400 dark:hover:bg-indigo-950/30"
+          >
+            <List className="h-4 w-4" />
+            Add MCQ
+          </button>
+          <button
+            type="button"
+            onClick={() => setQuestions((prev) => [...prev, emptyQuestion('coding')])}
+            className="flex items-center gap-1 rounded-lg border border-emerald-300 px-3 py-2 text-sm font-medium text-emerald-600 transition-colors duration-200 hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-950/30"
+          >
+            <Code2 className="h-4 w-4" />
+            Add Coding
+          </button>
+        </div>
       </div>
 
       <div className="space-y-6">
@@ -312,17 +396,17 @@ export function MCQBuilder({ editingTest, onSave, onCancel }: MCQBuilderProps) {
           >
             <div className="mb-4 flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <span className="font-mono text-sm font-semibold text-indigo-600 dark:text-indigo-400">
+                <span className={`flex items-center gap-1.5 font-mono text-sm font-semibold ${q.type === 'coding' ? 'text-emerald-600 dark:text-emerald-400' : 'text-indigo-600 dark:text-indigo-400'}`}>
+                  {q.type === 'coding' ? <Code2 className="h-4 w-4" /> : <List className="h-4 w-4" />}
                   Q{qi + 1}
                 </span>
-                {/* Per-question marks */}
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 ml-4">
                   <label className="text-xs text-slate-500 dark:text-slate-400">Marks:</label>
                   <input
                     type="number"
                     min={1}
-                    max={10}
-                    value={q.marks ?? 1}
+                    max={100}
+                    value={q.marks ?? (q.type === 'coding' ? 10 : 1)}
                     onChange={(e) => updateQuestion(q.id, { marks: Math.max(1, Number(e.target.value)) })}
                     className="w-14 rounded border border-slate-300 px-2 py-0.5 text-center font-mono text-sm outline-none focus:ring-1 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-800 dark:text-white"
                   />
@@ -352,7 +436,7 @@ export function MCQBuilder({ editingTest, onSave, onCancel }: MCQBuilderProps) {
                   disabled={questions.length <= 1}
                   onClick={() => removeQuestion(q.id)}
                   className="rounded p-1.5 text-red-400 transition-colors duration-200 hover:bg-red-50 hover:text-red-600 disabled:opacity-30 dark:hover:bg-red-950/30"
-                  title="Discard scenario"
+                  title="Discard question"
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>
@@ -361,41 +445,115 @@ export function MCQBuilder({ editingTest, onSave, onCancel }: MCQBuilderProps) {
 
             <div className="mb-4">
               <label className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">
-                Scenario Text
+                {q.type === 'coding' ? 'Problem Statement' : 'Question Text'}
               </label>
               <textarea
                 value={q.text}
                 onChange={(e) => updateQuestion(q.id, { text: e.target.value })}
-                rows={2}
-                placeholder="Write the question scenario..."
-                className="w-full rounded-lg border border-slate-300 px-4 py-2.5 outline-none focus:ring-2 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-800 dark:text-white"
+                rows={q.type === 'coding' ? 4 : 2}
+                placeholder={q.type === 'coding' ? "Describe the problem, input format, output format, and constraints..." : "Write the question..."}
+                className="w-full rounded-lg border border-slate-300 px-4 py-2.5 outline-none focus:ring-2 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-800 dark:text-white font-mono text-sm"
               />
             </div>
 
-            <div className="space-y-2">
-              <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                Options & Correct Answer Key
-              </p>
-              {q.options.map((opt, oi) => (
-                <div key={oi} className="flex items-center gap-3">
-                  <input
-                    type="radio"
-                    name={`correct-${q.id}`}
-                    checked={q.correctIndex === oi}
-                    onChange={() => updateQuestion(q.id, { correctIndex: oi })}
-                    className="h-4 w-4 accent-indigo-500"
-                  />
-                  <span className="w-6 font-mono text-sm font-bold text-slate-500">{LABELS[oi]}</span>
-                  <input
-                    type="text"
-                    value={opt}
-                    onChange={(e) => updateOption(q.id, oi, e.target.value)}
-                    placeholder={`Option ${LABELS[oi]}`}
-                    className="flex-1 rounded-lg border border-slate-300 px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-800 dark:text-white"
-                  />
+            {q.type === 'mcq' ? (
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  Options & Correct Answer Key
+                </p>
+                {(q.options || ['', '', '', '']).map((opt, oi) => (
+                  <div key={oi} className="flex items-center gap-3">
+                    <input
+                      type="radio"
+                      name={`correct-${q.id}`}
+                      checked={q.correctIndex === oi}
+                      onChange={() => updateQuestion(q.id, { correctIndex: oi })}
+                      className="h-4 w-4 accent-indigo-500"
+                    />
+                    <span className="w-6 font-mono text-sm font-bold text-slate-500">{LABELS[oi]}</span>
+                    <input
+                      type="text"
+                      value={opt}
+                      onChange={(e) => updateOption(q.id, oi, e.target.value)}
+                      placeholder={`Option ${LABELS[oi]}`}
+                      className="flex-1 rounded-lg border border-slate-300 px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-800 dark:text-white"
+                    />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                      Test Cases
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => addTestCase(q.id)}
+                      className="flex items-center gap-1 text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:underline"
+                    >
+                      <Plus className="h-3 w-3" /> Add Test Case
+                    </button>
+                  </div>
+                  
+                  {(!q.testCases || q.testCases.length === 0) ? (
+                    <p className="text-xs text-slate-500 italic">No test cases added. At least one is required.</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {q.testCases.map((tc, tcIndex) => (
+                        <div key={tcIndex} className="relative rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-3">
+                          <button
+                            type="button"
+                            onClick={() => removeTestCase(q.id, tcIndex)}
+                            className="absolute top-2 right-2 text-slate-400 hover:text-red-500 transition-colors"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                          
+                          <div className="flex items-center gap-2 mb-3">
+                            <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Case {tcIndex + 1}</span>
+                            <button
+                              type="button"
+                              onClick={() => updateTestCase(q.id, tcIndex, { isHidden: !tc.isHidden })}
+                              className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border transition-colors ${
+                                tc.isHidden 
+                                  ? 'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/40 dark:text-amber-400 dark:border-amber-800/50' 
+                                  : 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-400 dark:border-emerald-800/50'
+                              }`}
+                            >
+                              {tc.isHidden ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                              {tc.isHidden ? 'Hidden during test' : 'Visible to student'}
+                            </button>
+                          </div>
+                          
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">STDIN (Input)</label>
+                              <textarea
+                                value={tc.input}
+                                onChange={(e) => updateTestCase(q.id, tcIndex, { input: e.target.value })}
+                                rows={2}
+                                className="w-full rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-1.5 text-xs font-mono outline-none focus:border-indigo-500"
+                              />
+                            </div>
+                            <div>
+                              <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">STDOUT (Expected)</label>
+                              <textarea
+                                value={tc.expectedOutput}
+                                onChange={(e) => updateTestCase(q.id, tcIndex, { expectedOutput: e.target.value })}
+                                rows={2}
+                                className="w-full rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-1.5 text-xs font-mono outline-none focus:border-indigo-500"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              ))}
-            </div>
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -423,7 +581,7 @@ export function MCQBuilder({ editingTest, onSave, onCancel }: MCQBuilderProps) {
           className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-indigo-500 py-3 font-medium text-white transition-colors duration-200 hover:bg-indigo-600"
         >
           <Save className="h-4 w-4" />
-          {editingTest ? 'Update Test' : 'Publish Test'}
+          {editingTest ? 'Update Assessment' : 'Publish Assessment'}
         </button>
         <button
           type="button"

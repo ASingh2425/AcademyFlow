@@ -1,8 +1,10 @@
 import { AlertTriangle, ChevronLeft, ChevronRight, Flag, Send, Shield } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { CodeEditor } from '../components/CodeEditor'
 import { Modal } from '../components/Modal'
 import { CameraProctor } from '../components/CameraProctor'
 import { AIProctorMonitor } from '../components/AIProctorMonitor'
+import { AntiCameraOverlay } from '../components/AntiCameraOverlay'
 import { useProctoring } from '../hooks/useProctoring'
 import { api } from '../lib/api'
 import { formatTimeRemaining } from '../lib/scoring'
@@ -90,11 +92,11 @@ export function ExamView({ test, session, onUpdateSession, onSubmit }: ExamViewP
   const selected = session.answers[session.currentIndex]
   const isFlagged = session.flaggedQuestions.includes(session.currentIndex)
 
-  const setAnswer = (index: number) => {
+  const setAnswer = (val: any) => {
     onUpdateSession((prev) => {
       if (!prev) return prev
       const answers = [...prev.answers]
-      answers[prev.currentIndex] = index
+      answers[prev.currentIndex] = val
       return { ...prev, answers }
     })
   }
@@ -123,7 +125,9 @@ export function ExamView({ test, session, onUpdateSession, onSubmit }: ExamViewP
         : 'font-mono text-2xl font-bold text-slate-900 dark:text-white'
 
   return (
-    <div className="animate-fade-in mx-auto flex max-w-7xl flex-col gap-4 px-4 py-6 lg:flex-row lg:px-6">
+    <div className="exam-mode animate-fade-in mx-auto flex max-w-7xl flex-col gap-4 px-4 py-6 lg:flex-row lg:px-6">
+      <AntiCameraOverlay email={session.candidateName} active={true} />
+      
       {/* Main question area */}
       <div className="flex-1">
         {/* Top bar — always visible */}
@@ -175,34 +179,48 @@ export function ExamView({ test, session, onUpdateSession, onSubmit }: ExamViewP
             </p>
           )}
 
-          <div className="mt-8 space-y-3">
-            {currentQ.options.map((opt, i) => {
-              const isSelected = selected === i
-              return (
-                <button
-                  key={i}
-                  type="button"
-                  onClick={() => setAnswer(i)}
-                  className={`flex w-full items-start gap-4 rounded-xl border-2 px-4 py-4 text-left transition-all duration-200 ${
-                    isSelected
-                      ? 'border-indigo-500 bg-indigo-50 shadow-md shadow-indigo-500/10 dark:border-indigo-400 dark:bg-indigo-950/40'
-                      : 'border-slate-200 bg-slate-50 hover:border-slate-300 dark:border-slate-700 dark:bg-slate-800/50 dark:hover:border-slate-600'
-                  }`}
-                >
-                  <span
-                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg font-mono text-sm font-bold ${
+          {currentQ.type === 'coding' ? (
+            <div className="mt-8">
+              <CodeEditor
+                code={typeof selected === 'object' && selected !== null ? selected.code : (currentQ.starterCode?.[currentQ.allowedLanguages?.[0] || 'python'] || '')}
+                language={typeof selected === 'object' && selected !== null ? selected.language : (currentQ.allowedLanguages?.[0] || 'python')}
+                onChange={(code) => {
+                  const lang = typeof selected === 'object' && selected !== null ? selected.language : (currentQ.allowedLanguages?.[0] || 'python')
+                  setAnswer({ code: code || '', language: lang })
+                }}
+                testCases={currentQ.testCases || []}
+              />
+            </div>
+          ) : (
+            <div className="mt-8 space-y-3">
+              {(currentQ.options || []).map((opt, i) => {
+                const isSelected = selected === i
+                return (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => setAnswer(i)}
+                    className={`flex w-full items-start gap-4 rounded-xl border-2 px-4 py-4 text-left transition-all duration-200 ${
                       isSelected
-                        ? 'bg-indigo-500 text-white'
-                        : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'
+                        ? 'border-indigo-500 bg-indigo-50 shadow-md shadow-indigo-500/10 dark:border-indigo-400 dark:bg-indigo-950/40'
+                        : 'border-slate-200 bg-slate-50 hover:border-slate-300 dark:border-slate-700 dark:bg-slate-800/50 dark:hover:border-slate-600'
                     }`}
                   >
-                    {LABELS[i]}
-                  </span>
-                  <span className="pt-1 text-slate-800 dark:text-slate-200">{opt}</span>
-                </button>
-              )
-            })}
-          </div>
+                    <span
+                      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg font-mono text-sm font-bold ${
+                        isSelected
+                          ? 'bg-indigo-500 text-white'
+                          : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'
+                      }`}
+                    >
+                      {LABELS[i]}
+                    </span>
+                    <span className="pt-1 text-slate-800 dark:text-slate-200">{opt}</span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
 
           <div className="mt-8 flex items-center justify-between">
             <button

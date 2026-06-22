@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { getFaceDetector } from '../lib/faceDetector'
+import { getFaceDetector, getObjectDetector } from '../lib/visionTasks'
 import type { ProctorEvent } from '../types'
 
 export type GazeDirection = 'center' | 'left' | 'right' | 'up' | 'unknown'
@@ -16,6 +16,10 @@ export interface AIProctorStatus {
   // Gaze tracking
   lookingAway: boolean
   gazeDirection: GazeDirection
+  // Device & Audio tracking
+  deviceDetected: boolean
+  speakingAloud: boolean
+  audioLevel: number
 }
 
 function logEvent(onEvent: (event: ProctorEvent) => void, message: string) {
@@ -25,46 +29,24 @@ function logEvent(onEvent: (event: ProctorEvent) => void, message: string) {
   })
 }
 
-/**
- * Estimate gaze direction from BlazeFace keypoints.
- *
- * BlazeFace returns 6 keypoints (all normalized 0-1):
- *   [0] subject's right eye  (appears on camera-LEFT  → smaller x)
- *   [1] subject's left eye   (appears on camera-RIGHT → larger x)
- *   [2] nose tip
- *   [3] mouth centre
- *   [4] right ear tragion
- *   [5] left ear tragion
- *
- * YAW  (left / right): When the head turns right the subject's left eye
- *   closes in on the nose, so (nose.x − rightEye.x) grows while
- *   (leftEye.x − nose.x) shrinks.  We express this as an asymmetry ratio:
- *     yawAsymmetry = leftSpan / (leftSpan + rightSpan)   ≈ 0.5 when centred
- *     < 0.30 → looking to subject's LEFT
- *     > 0.70 → looking to subject's RIGHT
- *
- * PITCH (up): When the head tilts back the nose rises above the eye-mouth span.
- *     pitchRatio = (nose.y − eyeMid.y) / (mouth.y − eyeMid.y)
- *     < 0.15 → looking strongly UP (rare during an exam but still useful)
- */
 function estimateGaze(
   keypoints: Array<{ x: number; y: number }> | undefined
 ): { direction: GazeDirection; yawAsymmetry: number; pitchRatio: number } {
   const unknown = { direction: 'unknown' as GazeDirection, yawAsymmetry: 0.5, pitchRatio: 0.5 }
   if (!keypoints || keypoints.length < 4) return unknown
 
-  const rightEye = keypoints[0] // subject's right, camera-left
-  const leftEye  = keypoints[1] // subject's left,  camera-right
+  const rightEye = keypoints[0]
+  const leftEye  = keypoints[1]
   const nose     = keypoints[2]
   const mouth    = keypoints[3]
 
-  const leftSpan  = nose.x - rightEye.x  // nose → right-eye distance
-  const rightSpan = leftEye.x - nose.x   // left-eye → nose distance
+  const leftSpan  = nose.x - rightEye.x
+  const rightSpan = leftEye.x - nose.x
   const totalSpan = leftSpan + rightSpan
 
-  if (totalSpan < 0.01) return unknown // face too small / degenerate
+  if (totalSpan < 0.01) return unknown
 
-  const yawAsymmetry = leftSpan / totalSpan // ~0.5 when centred
+  const yawAsymmetry = leftSpan / totalSpan
 
   const eyeMidY = (rightEye.y + leftEye.y) / 2
   const vertSpan = mouth.y - eyeMidY
@@ -73,11 +55,11 @@ function estimateGaze(
   let direction: GazeDirection = 'center'
 
   if (yawAsymmetry < 0.30) {
-    direction = 'left'   // subject looking to their left
+    direction = 'left'
   } else if (yawAsymmetry > 0.70) {
-    direction = 'right'  // subject looking to their right
+    direction = 'right'
   } else if (pitchRatio < 0.15) {
-    direction = 'up'     // head tilted strongly back
+    direction = 'up'
   }
 
   return { direction, yawAsymmetry, pitchRatio }
@@ -102,9 +84,18 @@ export function useAIProctoring(
     let lastAnalysisTime = 0
     const conditionStartedAt: Record<string, number> = {}
     const lastLoggedAt: Record<string, number> = {}
+    
+    // Config
     const ANALYSIS_INTERVAL_MS = 250
-    const CONDITION_GRACE_MS   = 1500   // must persist for 1.5 s before flagging
-    const EVENT_COOLDOWN_MS    = 10_000 // don't spam same event within 10 s
+    const CONDITION_GRACE_MS   = 1500
+    const AUDIO_GRACE_MS       = 2500 // Must be loud for 2.5s to flag
+    const EVENT_COOLDOWN_MS    = 10_000
+    const AUDIO_THRESHOLD      = 30 // Out of 255 (adjust based on sensitivity needed)
+
+    // Audio context vars
+    let audioContext: AudioContext | null = null
+    let analyser: AnalyserNode | null = null
+    let dataArray: Uint8Array | null = null
 
     const initialStatus: AIProctorStatus = {
       facesDetected: 0,
@@ -117,6 +108,9 @@ export function useAIProctoring(
       modelError: null,
       lookingAway: false,
       gazeDirection: 'unknown',
+      deviceDetected: false,
+      speakingAloud: false,
+      audioLevel: 0,
     }
     onStatusRef.current(initialStatus)
 
@@ -124,14 +118,15 @@ export function useAIProctoring(
       key: string,
       activeCondition: boolean,
       message: string,
-      now: number
+      now: number,
+      graceMs = CONDITION_GRACE_MS
     ) => {
       if (!activeCondition) {
         delete conditionStartedAt[key]
         return
       }
       conditionStartedAt[key] ??= now
-      const sustained  = now - conditionStartedAt[key] >= CONDITION_GRACE_MS
+      const sustained  = now - conditionStartedAt[key] >= graceMs
       const cooledDown = now - (lastLoggedAt[key] ?? 0) >= EVENT_COOLDOWN_MS
       if (sustained && cooledDown) {
         logEvent(onEventRef.current, message)
@@ -139,8 +134,8 @@ export function useAIProctoring(
       }
     }
 
-    getFaceDetector()
-      .then((detector) => {
+    Promise.all([getFaceDetector(), getObjectDetector()])
+      .then(([faceDetector, objectDetector]) => {
         if (disposed) return
 
         const analyzeFrame = (frameTime: number) => {
@@ -150,6 +145,22 @@ export function useAIProctoring(
             animationFrame = requestAnimationFrame(analyzeFrame)
             return
           }
+
+          // Initialize Audio Analyzer if stream exists and isn't setup
+          const stream = video.srcObject as MediaStream
+          if (stream && stream.getAudioTracks().length > 0 && !audioContext) {
+            try {
+              audioContext = new AudioContext()
+              const source = audioContext.createMediaStreamSource(stream)
+              analyser = audioContext.createAnalyser()
+              analyser.fftSize = 256
+              source.connect(analyser)
+              dataArray = new Uint8Array(analyser.frequencyBinCount)
+            } catch (e) {
+              console.warn('Could not initialize audio analyzer', e)
+            }
+          }
+
           if (frameTime - lastAnalysisTime < ANALYSIS_INTERVAL_MS) {
             animationFrame = requestAnimationFrame(analyzeFrame)
             return
@@ -157,37 +168,47 @@ export function useAIProctoring(
           lastAnalysisTime = frameTime
 
           try {
-            const detections    = detector.detectForVideo(video, performance.now()).detections
-            const facesDetected = detections.length
+            const now = performance.now()
+            const faceDetections = faceDetector.detectForVideo(video, now).detections
+            const objDetections  = objectDetector.detectForVideo(video, now).detections
+
+            // ── Face Analysis ─────────────────────────────────────────────
+            const facesDetected = faceDetections.length
             const facePresence  = facesDetected > 0
             const multiplePeople = facesDetected > 1
-            const primary       = detections[0]
-            const box           = primary?.boundingBox
+            const primaryFace   = faceDetections[0]
+            const box           = primaryFace?.boundingBox
 
-            // ── Bounding-box attention (face centred & large enough) ──────
             const centerX = box ? (box.originX + box.width  / 2) / video.videoWidth  : 0
             const centerY = box ? (box.originY + box.height / 2) / video.videoHeight : 0
-            const faceArea = box
-              ? (box.width * box.height) / (video.videoWidth * video.videoHeight)
-              : 0
+            const faceArea = box ? (box.width * box.height) / (video.videoWidth * video.videoHeight) : 0
+            
             const attentionFocused =
               facePresence && !multiplePeople &&
               centerX >= 0.2 && centerX <= 0.8 &&
               centerY >= 0.15 && centerY <= 0.85 &&
               faceArea >= 0.025
 
-            // ── Gaze estimation from keypoints ────────────────────────────
-            const { direction, yawAsymmetry } = estimateGaze(primary?.keypoints as Array<{ x: number; y: number }> | undefined)
-            const lookingAway =
-              facePresence &&
-              !multiplePeople &&
-              direction !== 'center' &&
-              direction !== 'unknown'
+            const { direction } = estimateGaze(primaryFace?.keypoints as Array<{ x: number; y: number }> | undefined)
+            const lookingAway = facePresence && !multiplePeople && direction !== 'center' && direction !== 'unknown'
 
-            // ── Confidence ────────────────────────────────────────────────
             const confidence = Math.round(
-              Math.max(0, ...detections.map((d) => d.categories[0]?.score ?? 0)) * 100
+              Math.max(0, ...faceDetections.map((d) => d.categories[0]?.score ?? 0)) * 100
             )
+
+            // ── Object Analysis ───────────────────────────────────────────
+            const phones = objDetections.filter(d => d.categories[0]?.categoryName === 'cell phone')
+            const deviceDetected = phones.length > 0
+
+            // ── Audio Analysis ────────────────────────────────────────────
+            let audioLevel = 0
+            let isLoud = false
+            if (analyser && dataArray) {
+              analyser.getByteFrequencyData(dataArray as any)
+              const sum = dataArray.reduce((a, b) => a + b, 0)
+              audioLevel = sum / dataArray.length
+              isLoud = audioLevel > AUDIO_THRESHOLD
+            }
 
             // ── Suspicious flags ──────────────────────────────────────────
             const suspicious: string[] = []
@@ -202,23 +223,17 @@ export function useAIProctoring(
                                         'Looking away from screen'
               suspicious.push(label)
             }
+            if (deviceDetected) suspicious.push('Unauthorised device (phone) detected')
+            if (isLoud) suspicious.push('Speaking aloud / loud noise detected')
 
             // ── Sustained-condition events ────────────────────────────────
-            const now = Date.now()
-            recordSustainedCondition('noFace', !facePresence, 'Face absent for more than 1.5 seconds', now)
-            recordSustainedCondition('multiplePeople', multiplePeople, 'Multiple people detected', now)
-            recordSustainedCondition(
-              'outsideFocus',
-              facePresence && !multiplePeople && !attentionFocused,
-              'Candidate moved outside the camera focus area',
-              now
-            )
-            recordSustainedCondition(
-              'lookingAway',
-              lookingAway,
-              `Candidate looked away from the screen (gaze: ${direction}, yaw ratio: ${yawAsymmetry.toFixed(2)})`,
-              now
-            )
+            const realNow = Date.now()
+            recordSustainedCondition('noFace', !facePresence, 'Face absent for more than 1.5 seconds', realNow)
+            recordSustainedCondition('multiplePeople', multiplePeople, 'Multiple people detected', realNow)
+            recordSustainedCondition('outsideFocus', facePresence && !multiplePeople && !attentionFocused, 'Candidate moved outside the camera focus area', realNow)
+            recordSustainedCondition('lookingAway', lookingAway, `Candidate looked away from the screen (gaze: ${direction})`, realNow)
+            recordSustainedCondition('deviceDetected', deviceDetected, 'Unauthorised device (phone) detected in view', realNow)
+            recordSustainedCondition('speakingAloud', isLoud, 'Candidate speaking aloud or loud noise detected', realNow, AUDIO_GRACE_MS)
 
             onStatusRef.current({
               facesDetected,
@@ -231,9 +246,12 @@ export function useAIProctoring(
               modelError: null,
               lookingAway,
               gazeDirection: facePresence ? direction : 'unknown',
+              deviceDetected,
+              speakingAloud: isLoud,
+              audioLevel,
             })
           } catch (error) {
-            const message = error instanceof Error ? error.message : 'Face analysis failed'
+            const message = error instanceof Error ? error.message : 'Analysis failed'
             onStatusRef.current({ ...initialStatus, modelReady: true, modelError: message })
           }
           animationFrame = requestAnimationFrame(analyzeFrame)
@@ -243,7 +261,7 @@ export function useAIProctoring(
       })
       .catch((error) => {
         if (disposed) return
-        const message = error instanceof Error ? error.message : 'ML model could not be loaded'
+        const message = error instanceof Error ? error.message : 'ML models could not be loaded'
         onStatusRef.current({ ...initialStatus, modelError: message })
         logEvent(onEventRef.current, `Model unavailable: ${message}`)
       })
@@ -251,6 +269,9 @@ export function useAIProctoring(
     return () => {
       disposed = true
       if (animationFrame !== null) cancelAnimationFrame(animationFrame)
+      if (audioContext && audioContext.state !== 'closed') {
+        audioContext.close().catch(console.error)
+      }
     }
   }, [active, videoElementRef])
 }

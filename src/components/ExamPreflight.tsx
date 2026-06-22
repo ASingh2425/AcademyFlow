@@ -13,7 +13,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { getFaceDetector } from '../lib/faceDetector'
+import { getFaceDetector } from '../lib/visionTasks'
 
 type CheckState = 'pending' | 'running' | 'passed' | 'failed'
 
