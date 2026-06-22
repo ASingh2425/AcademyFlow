@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AlertTriangle, CheckCircle, Eye, Users, Zap } from 'lucide-react'
+import { AlertTriangle, CheckCircle, Eye, EyeOff, Users, Zap } from 'lucide-react'
 import { useAIProctoring, type AIProctorStatus } from '../hooks/useAIProctoring'
 import type { ProctorEvent } from '../types'
 
@@ -23,6 +23,8 @@ export function AIProctorMonitor({
     confidence: 0,
     modelReady: false,
     modelError: null,
+    lookingAway: false,
+    gazeDirection: 'unknown',
   })
 
   useAIProctoring(videoRef, active, onProctorEvent, setAiStatus)
@@ -172,6 +174,45 @@ export function AIProctorMonitor({
               >
                 {aiStatus.facesDetected}
                 {aiStatus.multiplePeople ? ' (⚠ Multiple)' : ''}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Gaze Direction */}
+        <div
+          className={`rounded-lg border p-3 transition-all ${
+            !aiStatus.facePresence
+              ? 'border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900/30'
+              : aiStatus.lookingAway
+                ? 'border-red-300 bg-red-50 dark:border-red-600 dark:bg-red-950/30'
+                : 'border-emerald-300 bg-emerald-50 dark:border-emerald-600 dark:bg-emerald-950/30'
+          }`}
+        >
+          <div className="flex items-start gap-2">
+            {aiStatus.lookingAway
+              ? <EyeOff className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
+              : <Eye className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />}
+            <div className="flex-1">
+              <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                Gaze Direction
+              </p>
+              <p
+                className={`text-xs font-mono font-bold ${
+                  !aiStatus.facePresence
+                    ? 'text-slate-500 dark:text-slate-400'
+                    : aiStatus.lookingAway
+                      ? 'text-red-700 dark:text-red-300'
+                      : 'text-emerald-700 dark:text-emerald-300'
+                }`}
+              >
+                {!aiStatus.facePresence
+                  ? '—'
+                  : aiStatus.gazeDirection === 'left'  ? '⬅ Looking Left'
+                  : aiStatus.gazeDirection === 'right' ? '➡ Looking Right'
+                  : aiStatus.gazeDirection === 'up'    ? '⬆ Looking Up'
+                  : aiStatus.gazeDirection === 'center'? '✓ On Screen'
+                  :                                      'Calibrating…'}
               </p>
             </div>
           </div>
