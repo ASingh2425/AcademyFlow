@@ -8,7 +8,8 @@ Academic MCQ platform with separate instructor and student flows, scheduled test
 - **Hardware & Environment Readiness:** A mandatory readiness gate enforces checks on HTTPS, API health, camera, microphone, local MediaPipe face models, and explicit monitoring consent.
 - **AI Gaze & Face Tracking:** The browser continuously tracks the candidate's face. The assessment requires exactly one face looking at the screen. Looking away or having multiple people in frame triggers an alert.
 - **Object Detection (Phones):** The AI proctor utilizes a vision model (COCO-SSD via MediaPipe) to detect unauthorized devices (e.g., cell phones) in the camera frame.
-- **Audio Monitoring:** The system continuously monitors the microphone's audio levels. Speaking aloud or significant background noise triggers an audio alert.
+- **Audio & Local Voice Transcription:** The system monitors audio levels and uses browser Speech Recognition to transcribe spoken words locally. Speaking aloud or talking logs transcription flags in the proctor trail.
+- **Lockout Cooldown suspensions:** Critical violations (switching tabs, exiting fullscreen, or disconnecting media devices) trigger a **3-minute lockout suspension** covering the test. Candidates must wait out the cooldown before resuming. A **3rd infraction** results in immediate, automatic submission.
 - **Anti-Photography measures:** 
   - An invisible Moiré pattern grid overlay is placed on the screen. If a student tries to photograph their screen, it significantly distorts the image.
   - A dynamic, moving watermark containing the candidate's name overlays the exam view to trace any leaked images.
@@ -23,7 +24,11 @@ In addition to standard MCQs, AcademyFlow supports full-fledged coding tests:
 - **Assessment Builder:** Instructors can add Coding Questions alongside MCQs, configure mark values, and provide detailed problem statements.
 - **In-Browser IDE:** Candidates solve coding challenges using an integrated Monaco Editor (the same engine behind VS Code) with syntax highlighting and auto-completion.
 - **Test Cases:** Instructors can define multiple test cases consisting of STDIN inputs and expected STDOUT outputs. Test cases can be marked as visible (sample cases) or hidden.
-- **Auto-Grading:** Submissions are securely executed and evaluated on the backend using the Piston Execution Engine, ensuring accurate and automatic scoring against all test cases.
+- **Auto-Grading & Parallel Execution:** Submissions are securely executed and evaluated on the backend using the Piston Execution Engine in parallel, ensuring fast and accurate scores against all test cases.
+
+## Creator Studio Analytics
+
+- **Cohort Visual Metrics:** Displays live summary cards (Pass Rate progress ring, cohort average score progress circle, and Proctor Integrity index) directly inside the instructor dashboard.
 
 ## Roles & URLs
 
