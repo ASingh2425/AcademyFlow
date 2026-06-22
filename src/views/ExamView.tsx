@@ -26,9 +26,48 @@ export function ExamView({ test, session, onUpdateSession, onSubmit }: ExamViewP
   )
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [saveStatus, setSaveStatus] = useState<'saving' | 'saved' | 'offline'>('saved')
+  const [isFullscreen, setIsFullscreen] = useState(!!document.fullscreenElement)
+  
   const latestSessionRef = useRef(session)
   latestSessionRef.current = session
   const videoRef = useRef<HTMLVideoElement>(null)
+
+  useEffect(() => {
+    const handleFsChange = () => {
+      setIsFullscreen(!!document.fullscreenElement)
+    }
+    document.addEventListener('fullscreenchange', handleFsChange)
+    return () => document.removeEventListener('fullscreenchange', handleFsChange)
+  }, [])
+
+  const [lockoutCount, setLockoutCount] = useState(0)
+  const [lockoutUntil, setLockoutUntil] = useState<number | null>(null)
+  const [lockoutTimeLeft, setLockoutTimeLeft] = useState(0)
+
+  useEffect(() => {
+    if (!lockoutUntil) return
+    const interval = setInterval(() => {
+      const left = Math.max(0, Math.ceil((lockoutUntil - Date.now()) / 1000))
+      setLockoutTimeLeft(left)
+      if (left <= 0) {
+        clearInterval(interval)
+      }
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [lockoutUntil])
+
+  const enterFullscreen = () => {
+    try {
+      const doc = document.documentElement
+      if (doc.requestFullscreen) {
+        doc.requestFullscreen()
+      } else if ((doc as any).webkitRequestFullscreen) {
+        ;(doc as any).webkitRequestFullscreen()
+      }
+    } catch (e) {
+      console.warn('Failed to enter fullscreen mode:', e)
+    }
+  }
 
   const addProctorEvent = useCallback(
     (event: ProctorEvent) => {
@@ -50,15 +89,41 @@ export function ExamView({ test, session, onUpdateSession, onSubmit }: ExamViewP
     })
   }, [addProctorEvent])
 
-  useProctoring(true, addProctorEvent)
-
   const submittedRef = useRef(false)
-
   const submitOnce = useCallback((currentSession: ExamSession) => {
     if (submittedRef.current) return
     submittedRef.current = true
     onSubmit(currentSession)
   }, [onSubmit])
+
+  const handleLockout = useCallback((reason: string) => {
+    setLockoutUntil((current) => {
+      if (current && Date.now() < current) return current
+      
+      let nextCount = 0
+      setLockoutCount((prev) => {
+        nextCount = prev + 1
+        if (nextCount >= 3) {
+          addProctorEvent({
+            timestamp: new Date().toISOString(),
+            message: `AUTO-SUBMIT: Multiple suspensions limit reached (3 infractions). Last trigger: ${reason}`,
+          })
+          submitOnce(latestSessionRef.current)
+        } else {
+          addProctorEvent({
+            timestamp: new Date().toISOString(),
+            message: `SUSPENSION ACTIVE: 3-minute cooldown (Infraction #${nextCount}). Trigger: ${reason}`,
+          })
+        }
+        return nextCount
+      })
+
+      if (nextCount >= 3) return null
+      return Date.now() + 180 * 1000
+    })
+  }, [addProctorEvent, submitOnce])
+
+  useProctoring(true, addProctorEvent, handleLockout)
 
   useEffect(() => {
     submittedRef.current = false
@@ -127,6 +192,60 @@ export function ExamView({ test, session, onUpdateSession, onSubmit }: ExamViewP
   return (
     <div className="exam-mode animate-fade-in mx-auto flex max-w-7xl flex-col gap-4 px-4 py-6 lg:flex-row lg:px-6">
       <AntiCameraOverlay email={session.candidateName} active={true} />
+      
+      {lockoutUntil && Date.now() < lockoutUntil ? (
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-slate-950/95 backdrop-blur-lg px-4 text-center">
+          <div className="max-w-md rounded-2xl border border-red-500/40 bg-slate-900 p-8 shadow-2xl shadow-red-500/25">
+            <AlertTriangle className="mx-auto h-12 w-12 text-red-500 animate-bounce" />
+            <h3 className="mt-4 text-xl font-bold text-white">Assessment Suspended</h3>
+            <p className="mt-2 text-sm text-slate-400">
+              Your test session has been suspended due to tab focus loss, device disconnect, or a fullscreen violation.
+            </p>
+            <div className="my-6 rounded-xl bg-slate-800/80 p-4 border border-slate-700">
+              <p className="text-xs text-slate-400 uppercase tracking-wider font-semibold">Cooldown Period</p>
+              <p className="mt-1 font-mono text-3xl font-bold text-red-500">
+                {Math.floor(lockoutTimeLeft / 60)}:{(lockoutTimeLeft % 60).toString().padStart(2, '0')}
+              </p>
+            </div>
+            <p className="text-sm font-semibold text-amber-500">
+              Suspensions: {lockoutCount} / 2 warnings
+            </p>
+            <p className="mt-1 text-[11px] text-slate-500">
+              *A 3rd infraction will result in immediate, automated test submission.
+            </p>
+            <button
+              type="button"
+              disabled={lockoutTimeLeft > 0}
+              onClick={() => {
+                setLockoutUntil(null)
+                enterFullscreen()
+              }}
+              className="mt-6 w-full rounded-xl bg-indigo-500 py-3 text-sm font-semibold text-white transition-all hover:bg-indigo-600 disabled:opacity-50 focus:outline-none"
+            >
+              {lockoutTimeLeft > 0 ? 'Cooldown Active' : 'Resume Assessment'}
+            </button>
+          </div>
+        </div>
+      ) : (
+        !isFullscreen && (
+          <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-slate-950/90 backdrop-blur-md px-4 text-center">
+            <div className="max-w-md rounded-2xl border border-red-500/30 bg-slate-900 p-8 shadow-2xl shadow-red-500/10">
+              <AlertTriangle className="mx-auto h-12 w-12 text-amber-500 animate-bounce" />
+              <h3 className="mt-4 text-xl font-bold text-white">Fullscreen Required</h3>
+              <p className="mt-2 text-sm text-slate-400">
+                To take this exam, your window must be in fullscreen mode.
+              </p>
+              <button
+                type="button"
+                onClick={enterFullscreen}
+                className="mt-6 w-full rounded-xl bg-indigo-500 py-3 text-sm font-semibold text-white transition-all hover:bg-indigo-600 focus:outline-none"
+              >
+                Enter Fullscreen Mode
+              </button>
+            </div>
+          </div>
+        )
+      )}
       
       {/* Main question area */}
       <div className="flex-1">

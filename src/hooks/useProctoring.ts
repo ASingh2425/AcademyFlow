@@ -20,15 +20,27 @@ function logEvent(onEvent: (e: ProctorEvent) => void, msg: string) {
 
 export function useProctoring(
   active: boolean,
-  onEvent: (event: ProctorEvent) => void
+  onEvent: (event: ProctorEvent) => void,
+  onLockout?: (reason: string) => void
 ): void {
   const onEventRef = useRef(onEvent)
   onEventRef.current = onEvent
+  const onLockoutRef = useRef(onLockout)
+  onLockoutRef.current = onLockout
 
   useEffect(() => {
     if (!active) return
 
-    const fire = (msg: string) => logEvent(onEventRef.current, msg)
+    const fire = (msg: string) => {
+      logEvent(onEventRef.current, msg)
+    }
+
+    const fireLockout = (reason: string) => {
+      fire(reason)
+      if (onLockoutRef.current) {
+        onLockoutRef.current(reason)
+      }
+    }
 
     // CameraProctor owns the stream. Here we only detect devices that disappear,
     // which avoids a second permission prompt and duplicate camera capture.
@@ -45,10 +57,10 @@ export function useProctoring(
       )
 
       if (reportChanges && [...knownVideoInputs].some((id) => !videoInputs.has(id))) {
-        fire('Camera disconnected during exam')
+        fireLockout('Camera disconnected during exam')
       }
       if (reportChanges && [...knownAudioInputs].some((id) => !audioInputs.has(id))) {
-        fire('Microphone disconnected during exam')
+        fireLockout('Microphone disconnected during exam')
       }
       knownVideoInputs = videoInputs
       knownAudioInputs = audioInputs
@@ -60,12 +72,12 @@ export function useProctoring(
     navigator.mediaDevices?.addEventListener('devicechange', handleDeviceChange)
 
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') fire('Exam tab hidden or switched')
+      if (document.visibilityState === 'hidden') fireLockout('Exam tab hidden or switched')
     }
     document.addEventListener('visibilitychange', handleVisibilityChange)
 
     const handleFullscreenChange = () => {
-      if (!document.fullscreenElement) fire('Fullscreen mode exited during exam')
+      if (!document.fullscreenElement) fireLockout('Fullscreen mode exited during exam')
     }
     document.addEventListener('fullscreenchange', handleFullscreenChange)
 

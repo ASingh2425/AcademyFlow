@@ -105,6 +105,35 @@ export function AdminDashboard({
   const [students, setStudents] = useState<Student[]>([])
   const [studentsLoading, setStudentsLoading] = useState(false)
 
+  const stats = useMemo(() => {
+    const totalTests = tests.length
+    const totalSubs = submissions.length
+    let totalScore = 0
+    let totalMarks = 0
+    let passedCount = 0
+    let flaggedCount = 0
+
+    submissions.forEach((sub) => {
+      totalScore += sub.score
+      const totalQMarks = sub.totalMarks ?? sub.totalQuestions
+      totalMarks += totalQMarks
+      const test = tests.find((t) => t.id === sub.testId)
+      const pct = totalQMarks > 0 ? (sub.score / totalQMarks) * 100 : 0
+      if (pct >= (test?.passMark ?? 50)) {
+        passedCount++
+      }
+      if (sub.proctorEvents.length > 0) {
+        flaggedCount++
+      }
+    })
+
+    const avgPct = totalMarks > 0 ? Math.round((totalScore / totalMarks) * 100) : 0
+    const passRate = totalSubs > 0 ? Math.round((passedCount / totalSubs) * 100) : 0
+    const cleanRate = totalSubs > 0 ? Math.round(((totalSubs - flaggedCount) / totalSubs) * 100) : 100
+
+    return { totalTests, totalSubs, avgPct, passRate, cleanRate }
+  }, [tests, submissions])
+
   const loadStudents = useCallback(async () => {
     setStudentsLoading(true)
     try {
@@ -199,6 +228,98 @@ export function AdminDashboard({
           </button>
         </div>
       </div>
+
+      {/* Visual Analytics */}
+      {submissions.length > 0 && (
+        <div className="mb-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          {/* Card 1: Pass Rate Ring */}
+          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900 flex items-center justify-between">
+            <div>
+              <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">Pass Rate</p>
+              <h3 className="mt-1 text-3xl font-bold text-slate-900 dark:text-white">{stats.passRate}%</h3>
+              <p className="mt-1 text-xs text-slate-400">Passing threshold met</p>
+            </div>
+            <div className="relative h-16 w-16">
+              <svg className="h-full w-full" viewBox="0 0 36 36">
+                <path
+                  className="text-slate-200 dark:text-slate-800"
+                  strokeWidth="3.5"
+                  stroke="currentColor"
+                  fill="none"
+                  d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                />
+                <path
+                  className="text-emerald-500"
+                  strokeWidth="3.5"
+                  strokeDasharray={`${stats.passRate}, 100`}
+                  strokeLinecap="round"
+                  stroke="currentColor"
+                  fill="none"
+                  d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                />
+              </svg>
+            </div>
+          </div>
+
+          {/* Card 2: Average Score Bar */}
+          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900 flex items-center justify-between">
+            <div>
+              <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">Average Score</p>
+              <h3 className="mt-1 text-3xl font-bold text-indigo-600 dark:text-indigo-400">{stats.avgPct}%</h3>
+              <p className="mt-1 text-xs text-slate-400">Overall cohort mean</p>
+            </div>
+            <div className="relative h-16 w-16">
+              <svg className="h-full w-full" viewBox="0 0 36 36">
+                <path
+                  className="text-slate-200 dark:text-slate-800"
+                  strokeWidth="3.5"
+                  stroke="currentColor"
+                  fill="none"
+                  d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                />
+                <path
+                  className="text-indigo-500"
+                  strokeWidth="3.5"
+                  strokeDasharray={`${stats.avgPct}, 100`}
+                  strokeLinecap="round"
+                  stroke="currentColor"
+                  fill="none"
+                  d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                />
+              </svg>
+            </div>
+          </div>
+
+          {/* Card 3: Integrity Index */}
+          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900 flex items-center justify-between">
+            <div>
+              <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">Integrity Index</p>
+              <h3 className="mt-1 text-3xl font-bold text-amber-500">{stats.cleanRate}%</h3>
+              <p className="mt-1 text-xs text-slate-400">No flags recorded</p>
+            </div>
+            <div className="relative h-16 w-16">
+              <svg className="h-full w-full" viewBox="0 0 36 36">
+                <path
+                  className="text-slate-200 dark:text-slate-800"
+                  strokeWidth="3.5"
+                  stroke="currentColor"
+                  fill="none"
+                  d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                />
+                <path
+                  className="text-amber-500"
+                  strokeWidth="3.5"
+                  strokeDasharray={`${stats.cleanRate}, 100`}
+                  strokeLinecap="round"
+                  stroke="currentColor"
+                  fill="none"
+                  d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                />
+              </svg>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="mb-6 flex gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-slate-100 p-1 dark:border-slate-700 dark:bg-slate-800/50">

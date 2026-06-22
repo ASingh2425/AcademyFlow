@@ -474,49 +474,48 @@ app.post('/api/submissions', requireStudent, serializeMutation(async (req, res) 
 
   const correctAnswers = test.questions.map((question) => question.correctIndex ?? null)
   
-  // Grade coding questions synchronously (may take a few seconds)
-  let score = 0;
-  for (let index = 0; index < test.questions.length; index++) {
-    const question = test.questions[index];
-    const answer = answers[index];
-    
-    if (question.type === 'coding' && answer && typeof answer === 'object') {
-      let passedAll = true;
-      if (Array.isArray(question.testCases)) {
-        for (const tc of question.testCases) {
-          try {
-            const res = await fetch('https://emkc.org/api/v2/piston/execute', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                language: answer.language,
-                version: '*', // uses latest
-                files: [{ content: answer.code }],
-                stdin: tc.input
-              })
-            });
-            const out = await res.json();
-            const output = (out.run?.stdout || out.run?.output || '').trim();
-            if (output !== tc.expectedOutput.trim()) {
-              passedAll = false;
-              break;
-            }
-          } catch (e) {
-            passedAll = false;
-            break;
-          }
+  // Grade all questions concurrently (MCQs are instant, Coding questions invoke Piston API test cases in parallel)
+  const questionGrades = await Promise.all(
+    test.questions.map(async (question, index) => {
+      const answer = answers[index]
+      if (question.type === 'coding' && answer && typeof answer === 'object') {
+        if (!Array.isArray(question.testCases) || question.testCases.length === 0) {
+          return 0
+        }
+        try {
+          const results = await Promise.all(
+            question.testCases.map(async (tc) => {
+              try {
+                const res = await fetch('https://emkc.org/api/v2/piston/execute', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    language: answer.language,
+                    version: '*',
+                    files: [{ content: answer.code }],
+                    stdin: tc.input,
+                  }),
+                })
+                const out = await res.json()
+                const output = (out.run?.stdout || out.run?.output || '').trim()
+                return output === tc.expectedOutput.trim()
+              } catch {
+                return false
+              }
+            })
+          )
+          const passedAll = results.every((r) => r === true)
+          return passedAll ? (question.marks ?? 1) : 0
+        } catch {
+          return 0
         }
       } else {
-        passedAll = false;
+        // MCQ
+        return answer === question.correctIndex ? (question.marks ?? 1) : 0
       }
-      if (passedAll) score += (question.marks ?? 1);
-    } else {
-      // MCQ
-      if (answer === question.correctIndex) {
-        score += (question.marks ?? 1);
-      }
-    }
-  }
+    })
+  )
+  const score = questionGrades.reduce((a, b) => a + b, 0)
   const totalMarks = test.questions.reduce((total, question) => total + (question.marks ?? 1), 0)
   const durationSeconds = Math.max(0, Math.min(
     Math.floor((Date.now() - new Date(attempt.startedAt).getTime()) / 1000),

@@ -90,12 +90,45 @@ export function useAIProctoring(
     const CONDITION_GRACE_MS   = 1500
     const AUDIO_GRACE_MS       = 2500 // Must be loud for 2.5s to flag
     const EVENT_COOLDOWN_MS    = 10_000
-    const AUDIO_THRESHOLD      = 30 // Out of 255 (adjust based on sensitivity needed)
+    const AUDIO_THRESHOLD      = 8 // Out of 255 (Lower value = higher sensitivity)
 
     // Audio context vars
     let audioContext: AudioContext | null = null
     let analyser: AnalyserNode | null = null
     let dataArray: Uint8Array | null = null
+
+    // Web Speech API Local Recognition
+    const SpeechRecognitionAPI = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+    let recognition: any = null
+    if (SpeechRecognitionAPI) {
+      try {
+        recognition = new SpeechRecognitionAPI()
+        recognition.continuous = true
+        recognition.interimResults = false
+        recognition.lang = 'en-US'
+        
+        recognition.onresult = (event: any) => {
+          const lastResultIndex = event.results.length - 1
+          const transcript = event.results[lastResultIndex][0].transcript.trim()
+          if (transcript.length > 2) {
+            logEvent(onEventRef.current, `Spoken voice flagged: "${transcript}"`)
+          }
+        }
+        recognition.onerror = () => {
+          // ignore transient speech recognition errors
+        }
+        recognition.onend = () => {
+          if (!disposed && active) {
+            try {
+              recognition.start()
+            } catch {}
+          }
+        }
+        recognition.start()
+      } catch (e) {
+        console.warn('Speech recognition API failed to initialize', e)
+      }
+    }
 
     const initialStatus: AIProctorStatus = {
       facesDetected: 0,
@@ -271,6 +304,11 @@ export function useAIProctoring(
       if (animationFrame !== null) cancelAnimationFrame(animationFrame)
       if (audioContext && audioContext.state !== 'closed') {
         audioContext.close().catch(console.error)
+      }
+      if (recognition) {
+        try {
+          recognition.stop()
+        } catch {}
       }
     }
   }, [active, videoElementRef])
