@@ -16,14 +16,7 @@ async function createDetector(): Promise<FaceDetector> {
     minSuppressionThreshold: 0.3,
   }
 
-  try {
-    return await FaceDetector.createFromOptions(vision, {
-      ...options,
-      baseOptions: { ...options.baseOptions, delegate: 'GPU' },
-    })
-  } catch {
-    return FaceDetector.createFromOptions(vision, options)
-  }
+  return FaceDetector.createFromOptions(vision, options)
 }
 
 export function getFaceDetector(): Promise<FaceDetector> {
