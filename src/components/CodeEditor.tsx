@@ -1,6 +1,13 @@
-import Editor from '@monaco-editor/react'
-import { useState } from 'react'
+import Editor, { loader } from '@monaco-editor/react'
+import { useState, useEffect } from 'react'
 import { Loader2, Play, CheckCircle2, XCircle } from 'lucide-react'
+
+// Configure Monaco Loader to use jsdelivr CDN
+loader.config({
+  paths: {
+    vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.43.0/min/vs'
+  }
+})
 
 interface TestCase {
   input: string
@@ -18,8 +25,17 @@ interface CodeEditorProps {
 export function CodeEditor({ code, language, onChange, testCases }: CodeEditorProps) {
   const [running, setRunning] = useState(false)
   const [results, setResults] = useState<{ passed: boolean; output: string }[] | null>(null)
+  const [loadFailed, setLoadFailed] = useState(false)
+  const [useFallback, setUseFallback] = useState(false)
 
   const publicTestCases = testCases.filter((tc) => !tc.isHidden)
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setLoadFailed(true)
+    }, 7000)
+    return () => clearTimeout(timer)
+  }, [])
 
   const handleRunCode = async () => {
     setRunning(true)
@@ -52,25 +68,49 @@ export function CodeEditor({ code, language, onChange, testCases }: CodeEditorPr
 
   return (
     <div className="flex flex-col h-[600px] border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden bg-white dark:bg-slate-900">
-      <div className="flex-1 min-h-[300px]">
-        <Editor
-          height="100%"
-          language={language}
-          theme="vs-dark"
-          value={code}
-          onChange={onChange}
-          options={{
-            minimap: { enabled: false },
-            fontSize: 14,
-            padding: { top: 16 },
-            scrollBeyondLastLine: false,
-          }}
-          loading={
-            <div className="flex h-full items-center justify-center bg-slate-900">
-              <Loader2 className="h-6 w-6 animate-spin text-indigo-500" />
-            </div>
-          }
-        />
+      <div className="flex-1 min-h-[300px] relative">
+        {useFallback ? (
+          <textarea
+            className="w-full h-full p-4 font-mono text-sm bg-slate-950 text-slate-100 border-none outline-none resize-none focus:ring-0"
+            value={code}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder="Write your solution code here..."
+          />
+        ) : (
+          <Editor
+            height="100%"
+            language={language}
+            theme="vs-dark"
+            value={code}
+            onChange={onChange}
+            onMount={() => setLoadFailed(false)}
+            options={{
+              minimap: { enabled: false },
+              fontSize: 14,
+              padding: { top: 16 },
+              scrollBeyondLastLine: false,
+            }}
+            loading={
+              <div className="flex h-full items-center justify-center bg-slate-900">
+                <Loader2 className="h-6 w-6 animate-spin text-indigo-500" />
+              </div>
+            }
+          />
+        )}
+
+        {loadFailed && !useFallback && (
+          <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center z-10">
+            <p className="text-sm font-semibold text-slate-200">Editor is taking longer than expected to load</p>
+            <p className="text-xs text-slate-400 mt-1">This might be due to a slow internet connection or blocked CDN.</p>
+            <button
+              type="button"
+              onClick={() => setUseFallback(true)}
+              className="mt-4 rounded-lg bg-indigo-500 hover:bg-indigo-600 px-4 py-2 text-xs font-semibold text-white transition-colors"
+            >
+              Switch to Plain Text Editor
+            </button>
+          </div>
+        )}
       </div>
 
       {publicTestCases.length > 0 && (
