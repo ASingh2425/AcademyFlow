@@ -149,9 +149,17 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  executeCode: (language: string, code: string, stdin: string) =>
-    request<{ run?: { stdout: string; output: string }; message?: string; error?: string }>('/execute', {
+  executeCode: (language: string, code: string, stdin: string, testId?: string, questionId?: string) =>
+    request<{
+      run?: { stdout: string; output: string }
+      publicResults?: { passed: boolean; output: string }[]
+      hiddenStats?: { passed: number; total: number; allPassed: boolean }
+      earnedMarks?: number
+      maxMarks?: number
+      message?: string
+      error?: string
+    }>('/execute', {
       method: 'POST',
-      body: JSON.stringify({ language, code, stdin }),
+      body: JSON.stringify({ language, code, stdin, testId, questionId }),
     }),
 }

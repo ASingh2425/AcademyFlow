@@ -21,13 +21,17 @@ interface CodeEditorProps {
   language: string
   onChange: (value: string | undefined) => void
   testCases: TestCase[]
+  testId?: string
+  questionId?: string
 }
 
-export function CodeEditor({ code, language, onChange, testCases }: CodeEditorProps) {
+export function CodeEditor({ code, language, onChange, testCases, testId, questionId }: CodeEditorProps) {
   const [running, setRunning] = useState(false)
   const [results, setResults] = useState<{ passed: boolean; output: string }[] | null>(null)
   const [loadFailed, setLoadFailed] = useState(false)
   const [useFallback, setUseFallback] = useState(false)
+  const [hiddenStats, setHiddenStats] = useState<{ passed: number; total: number; allPassed: boolean } | null>(null)
+  const [estimatedMarks, setEstimatedMarks] = useState<{ earned: number; max: number } | null>(null)
 
   const publicTestCases = testCases.filter((tc) => !tc.isHidden)
 
@@ -40,8 +44,30 @@ export function CodeEditor({ code, language, onChange, testCases }: CodeEditorPr
 
   const handleRunCode = async () => {
     setRunning(true)
+    setResults(null)
+    setHiddenStats(null)
+    setEstimatedMarks(null)
+
+    if (testId && questionId) {
+      try {
+        const data = await api.executeCode(language, code, '', testId, questionId)
+        if (data.publicResults) {
+          setResults(data.publicResults)
+        }
+        if (data.hiddenStats) {
+          setHiddenStats(data.hiddenStats)
+        }
+        if (data.earnedMarks !== undefined && data.maxMarks !== undefined) {
+          setEstimatedMarks({ earned: data.earnedMarks, max: data.maxMarks })
+        }
+      } catch (err) {
+        setResults([{ passed: false, output: err instanceof Error ? err.message : 'Secure test suite execution failed.' }])
+      }
+      setRunning(false)
+      return
+    }
+
     const newResults = []
-    
     for (const tc of publicTestCases) {
       try {
         const out = await api.executeCode(language, code, tc.input)
@@ -109,17 +135,31 @@ export function CodeEditor({ code, language, onChange, testCases }: CodeEditorPr
       {publicTestCases.length > 0 && (
         <div className="border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-4 max-h-[250px] overflow-y-auto">
           <div className="flex items-center justify-between mb-3">
-            <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-300">
-              Sample Test Cases
-            </h4>
-            <button
-              onClick={handleRunCode}
-              disabled={running}
-              className="flex items-center gap-1.5 rounded-lg bg-indigo-500 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-indigo-600 disabled:opacity-50"
-            >
-              {running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
-              {running ? 'Running...' : 'Run Code'}
-            </button>
+            <div className="flex flex-col">
+              <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+                Sample Test Cases
+              </h4>
+              {estimatedMarks !== null && estimatedMarks !== undefined && (
+                <p className="text-xs text-indigo-500 font-semibold mt-0.5">
+                  Estimated Marks: {estimatedMarks.earned} / {estimatedMarks.max}
+                </p>
+              )}
+            </div>
+            <div className="flex items-center gap-3">
+              {hiddenStats && (
+                <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${hiddenStats.allPassed ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300' : 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300'}`}>
+                  Hidden Cases: {hiddenStats.passed} / {hiddenStats.total} passed
+                </span>
+              )}
+              <button
+                onClick={handleRunCode}
+                disabled={running}
+                className="flex items-center gap-1.5 rounded-lg bg-indigo-500 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-indigo-600 disabled:opacity-50"
+              >
+                {running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+                {running ? 'Running...' : 'Run Code'}
+              </button>
+            </div>
           </div>
 
           <div className="space-y-3">

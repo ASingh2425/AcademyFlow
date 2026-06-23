@@ -497,10 +497,95 @@ app.patch('/api/attempts/:id', requireStudent, serializeMutation(async (req, res
 }))
 
 app.post('/api/execute', requireStudent, async (req, res) => {
-  const { language, code, stdin } = req.body
+  const { language, code, stdin, testId, questionId } = req.body
   if (!language || !code) {
     return res.status(400).json({ error: 'Language and code are required.' })
   }
+
+  // If both testId and questionId are present, run full secure test case suite evaluation
+  if (testId && questionId) {
+    try {
+      const data = await readData()
+      const test = data.tests.find((t) => t.id === testId || t.code === testId)
+      if (!test) return res.status(404).json({ error: 'Test template not found.' })
+      const question = test.questions.find((q) => q.id === questionId)
+      if (!question) return res.status(404).json({ error: 'Question not found.' })
+
+      const testCases = question.testCases || []
+      const results = await Promise.all(
+        testCases.map(async (tc) => {
+          try {
+            let runResult
+            const pistonUrl = process.env.PISTON_URL || 'https://emkc.org/api/v2/piston/execute'
+            const pistonKey = process.env.PISTON_API_KEY
+            try {
+              const headers = { 'Content-Type': 'application/json' }
+              if (pistonKey) {
+                headers['Authorization'] = pistonKey
+              }
+              const response = await fetch(pistonUrl, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({
+                  language,
+                  version: '*',
+                  files: [{ name: getFilename(language), content: code }],
+                  stdin: tc.input,
+                }),
+              })
+              runResult = await response.json()
+              if (runResult.message && runResult.message.includes('whitelist')) {
+                runResult = await executeLocal(language, code, tc.input)
+              }
+            } catch {
+              runResult = await executeLocal(language, code, tc.input)
+            }
+
+            const output = (runResult.run?.stdout || runResult.run?.output || '').trim()
+            const passed = output === tc.expectedOutput.trim()
+            return {
+              passed,
+              output: tc.isHidden ? null : output,
+              isHidden: tc.isHidden,
+            }
+          } catch (e) {
+            return {
+              passed: false,
+              output: tc.isHidden ? null : 'Execution error: ' + e.message,
+              isHidden: tc.isHidden,
+            }
+          }
+        })
+      )
+
+      const publicResults = results
+        .filter((r) => !r.isHidden)
+        .map((r) => ({ passed: r.passed, output: r.output }))
+      const hiddenResults = results.filter((r) => r.isHidden)
+      const passedHidden = hiddenResults.filter((r) => r.passed).length
+      const totalHidden = hiddenResults.length
+
+      const totalPassed = results.filter((r) => r.passed).length
+      const maxMarks = question.marks ?? 1
+      const earnedMarks = testCases.length > 0 ? (totalPassed / testCases.length) * maxMarks : 0
+      const roundedMarks = Math.round(earnedMarks * 100) / 100
+
+      return res.json({
+        publicResults,
+        hiddenStats: {
+          passed: passedHidden,
+          total: totalHidden,
+          allPassed: passedHidden === totalHidden,
+        },
+        earnedMarks: roundedMarks,
+        maxMarks,
+      })
+    } catch (err) {
+      return res.status(500).json({ error: 'Test suite evaluation failed: ' + err.message })
+    }
+  }
+
+  // Fallback for single STDIN execution
   const pistonUrl = process.env.PISTON_URL || 'https://emkc.org/api/v2/piston/execute'
   const pistonKey = process.env.PISTON_API_KEY
   try {

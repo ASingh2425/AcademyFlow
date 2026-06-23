@@ -90,7 +90,7 @@ export function useAIProctoring(
     const CONDITION_GRACE_MS   = 1500
     const AUDIO_GRACE_MS       = 2500 // Must be loud for 2.5s to flag
     const EVENT_COOLDOWN_MS    = 10_000
-    const AUDIO_THRESHOLD      = 8 // Out of 255 (Lower value = higher sensitivity)
+    const AUDIO_THRESHOLD      = 20 // Out of 255 (Higher value = lower sensitivity, filters fan noise)
 
     // Audio context vars
     let audioContext: AudioContext | null = null

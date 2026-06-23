@@ -308,6 +308,8 @@ export function ExamView({ test, session, onUpdateSession, onSubmit }: ExamViewP
                   setAnswer({ code: code || '', language: lang })
                 }}
                 testCases={currentQ.testCases || []}
+                testId={test.id}
+                questionId={currentQ.id}
               />
             </div>
           ) : (
