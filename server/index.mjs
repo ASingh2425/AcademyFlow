@@ -504,8 +504,10 @@ app.post('/api/submissions', requireStudent, serializeMutation(async (req, res) 
               }
             })
           )
-          const passedAll = results.every((r) => r === true)
-          return passedAll ? (question.marks ?? 1) : 0
+          const passedCount = results.filter((r) => r === true).length
+          const maxMarks = question.marks ?? 1
+          const earnedMarks = (passedCount / question.testCases.length) * maxMarks
+          return Math.round(earnedMarks * 100) / 100
         } catch {
           return 0
         }
