@@ -5,6 +5,13 @@ import helmet from 'helmet'
 import { createHmac, randomInt, timingSafeEqual } from 'crypto'
 import { connectDB, readData, writeData, generateId } from './store.mjs'
 import { sendVerificationEmail } from './email.mjs'
+import { exec } from 'child_process'
+import { promises as fsPromises } from 'fs'
+import path from 'path'
+import { fileURLToPath } from 'url'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
 
 dotenv.config()
 
@@ -166,6 +173,59 @@ function getFilename(lang) {
   if (l.includes('java')) return 'Main.java'
   if (l.includes('c')) return 'main.c'
   return 'main'
+}
+
+async function executeLocal(language, code, stdin) {
+  const lang = String(language).toLowerCase()
+  let command = ''
+  let extension = ''
+  if (lang.includes('python')) {
+    command = 'python'
+    extension = 'py'
+  } else if (lang.includes('javascript') || lang.includes('js')) {
+    command = 'node'
+    extension = 'js'
+  } else {
+    throw new Error(`Local execution not supported for language: ${language}`)
+  }
+
+  const tempDir = path.join(__dirname, 'temp_runs')
+  await fsPromises.mkdir(tempDir, { recursive: true })
+  const fileName = `run_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${extension}`
+  const filePath = path.join(tempDir, fileName)
+  await fsPromises.writeFile(filePath, code)
+
+  return new Promise((resolve) => {
+    const fullCommand = `${command} "${filePath}"`
+    const child = exec(fullCommand, { timeout: 8000 }, async (error, stdout, stderr) => {
+      try {
+        await fsPromises.unlink(filePath)
+      } catch {}
+      if (error && error.killed) {
+        return resolve({
+          run: {
+            stdout: '',
+            stderr: 'Execution timed out (limit: 8 seconds)',
+            output: 'Execution timed out (limit: 8 seconds)'
+          }
+        })
+      }
+      const outVal = stdout || ''
+      const errVal = stderr || ''
+      resolve({
+        run: {
+          stdout: outVal,
+          stderr: errVal,
+          output: outVal + errVal
+        }
+      })
+    })
+
+    if (stdin) {
+      child.stdin.write(stdin)
+      child.stdin.end()
+    }
+  })
 }
 
 function generateCode() {
@@ -459,9 +519,18 @@ app.post('/api/execute', requireStudent, async (req, res) => {
       }),
     })
     const data = await response.json()
+    if (data.message && data.message.includes('whitelist')) {
+      const localResult = await executeLocal(language, code, stdin)
+      return res.json(localResult)
+    }
     res.json(data)
   } catch (error) {
-    res.status(500).json({ error: 'Code execution failed: ' + error.message })
+    try {
+      const localResult = await executeLocal(language, code, stdin)
+      res.json(localResult)
+    } catch (localErr) {
+      res.status(500).json({ error: 'Code execution failed locally and remotely: ' + localErr.message })
+    }
   }
 })
 
@@ -543,10 +612,22 @@ app.post('/api/submissions', requireStudent, serializeMutation(async (req, res) 
                   }),
                 })
                 const out = await res.json()
-                const output = (out.run?.stdout || out.run?.output || '').trim()
+                let output = ''
+                if (out.message && out.message.includes('whitelist')) {
+                  const localRes = await executeLocal(answer.language, answer.code, tc.input)
+                  output = (localRes.run?.stdout || localRes.run?.output || '').trim()
+                } else {
+                  output = (out.run?.stdout || out.run?.output || '').trim()
+                }
                 return output === tc.expectedOutput.trim()
               } catch {
-                return false
+                try {
+                  const localRes = await executeLocal(answer.language, answer.code, tc.input)
+                  const output = (localRes.run?.stdout || localRes.run?.output || '').trim()
+                  return output === tc.expectedOutput.trim()
+                } catch {
+                  return false
+                }
               }
             })
           )
