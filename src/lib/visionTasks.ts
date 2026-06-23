@@ -45,7 +45,7 @@ async function createObjectDetector(): Promise<ObjectDetector> {
     const options = {
       baseOptions: { modelAssetPath: assetPath('models/efficientdet_lite0.tflite') },
       runningMode: 'VIDEO' as const,
-      scoreThreshold: 0.5,
+      scoreThreshold: 0.25,
     }
     return await ObjectDetector.createFromOptions(vision, options)
   } catch (e) {
@@ -54,7 +54,7 @@ async function createObjectDetector(): Promise<ObjectDetector> {
     const options = {
       baseOptions: { modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/int8/1/efficientdet_lite0.tflite' },
       runningMode: 'VIDEO' as const,
-      scoreThreshold: 0.5,
+      scoreThreshold: 0.25,
     }
     return ObjectDetector.createFromOptions(vision, options)
   }

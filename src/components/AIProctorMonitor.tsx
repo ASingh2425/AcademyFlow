@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AlertTriangle, CheckCircle, Eye, EyeOff, Users, Zap, Smartphone, Mic } from 'lucide-react'
+import { AlertTriangle, CheckCircle, Eye, EyeOff, Users, Zap, Smartphone } from 'lucide-react'
 import { useAIProctoring, type AIProctorStatus } from '../hooks/useAIProctoring'
 import type { ProctorEvent } from '../types'
 
@@ -254,37 +254,6 @@ export function AIProctorMonitor({
           </div>
         </div>
 
-        {/* Audio Level */}
-        <div
-          className={`rounded-lg border p-3 transition-all ${
-            !aiStatus.speakingAloud
-              ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-600 dark:bg-emerald-950/30'
-              : 'border-red-300 bg-red-50 dark:border-red-600 dark:bg-red-950/30'
-          }`}
-        >
-          <div className="flex items-start gap-2">
-            <Mic
-              className={`h-4 w-4 shrink-0 ${
-                !aiStatus.speakingAloud
-                  ? 'text-emerald-600 dark:text-emerald-400'
-                  : 'text-red-600 dark:text-red-400'
-              }`}
-            />
-            <div className="flex-1">
-              <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">
-                Audio Level
-              </p>
-              <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
-                <div
-                  className={`h-full transition-all duration-75 ${
-                    aiStatus.speakingAloud ? 'bg-red-500' : 'bg-emerald-500'
-                  }`}
-                  style={{ width: `${Math.min(100, (aiStatus.audioLevel / 255) * 100 * 2)}%` }}
-                />
-              </div>
-            </div>
-          </div>
-        </div>
 
         {/* Threat Level */}
         <div

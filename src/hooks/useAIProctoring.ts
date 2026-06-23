@@ -88,47 +88,7 @@ export function useAIProctoring(
     // Config
     const ANALYSIS_INTERVAL_MS = 250
     const CONDITION_GRACE_MS   = 1500
-    const AUDIO_GRACE_MS       = 2500 // Must be loud for 2.5s to flag
     const EVENT_COOLDOWN_MS    = 10_000
-    const AUDIO_THRESHOLD      = 20 // Out of 255 (Higher value = lower sensitivity, filters fan noise)
-
-    // Audio context vars
-    let audioContext: AudioContext | null = null
-    let analyser: AnalyserNode | null = null
-    let dataArray: Uint8Array | null = null
-
-    // Web Speech API Local Recognition
-    const SpeechRecognitionAPI = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
-    let recognition: any = null
-    if (SpeechRecognitionAPI) {
-      try {
-        recognition = new SpeechRecognitionAPI()
-        recognition.continuous = true
-        recognition.interimResults = false
-        recognition.lang = 'en-US'
-        
-        recognition.onresult = (event: any) => {
-          const lastResultIndex = event.results.length - 1
-          const transcript = event.results[lastResultIndex][0].transcript.trim()
-          if (transcript.length > 2) {
-            logEvent(onEventRef.current, `Spoken voice flagged: "${transcript}"`)
-          }
-        }
-        recognition.onerror = () => {
-          // ignore transient speech recognition errors
-        }
-        recognition.onend = () => {
-          if (!disposed && active) {
-            try {
-              recognition.start()
-            } catch {}
-          }
-        }
-        recognition.start()
-      } catch (e) {
-        console.warn('Speech recognition API failed to initialize', e)
-      }
-    }
 
     const initialStatus: AIProctorStatus = {
       facesDetected: 0,
@@ -179,21 +139,6 @@ export function useAIProctoring(
             return
           }
 
-          // Initialize Audio Analyzer if stream exists and isn't setup
-          const stream = video.srcObject as MediaStream
-          if (stream && stream.getAudioTracks().length > 0 && !audioContext) {
-            try {
-              audioContext = new AudioContext()
-              const source = audioContext.createMediaStreamSource(stream)
-              analyser = audioContext.createAnalyser()
-              analyser.fftSize = 256
-              source.connect(analyser)
-              dataArray = new Uint8Array(analyser.frequencyBinCount)
-            } catch (e) {
-              console.warn('Could not initialize audio analyzer', e)
-            }
-          }
-
           if (frameTime - lastAnalysisTime < ANALYSIS_INTERVAL_MS) {
             animationFrame = requestAnimationFrame(analyzeFrame)
             return
@@ -233,16 +178,6 @@ export function useAIProctoring(
             const phones = objDetections.filter(d => d.categories[0]?.categoryName === 'cell phone')
             const deviceDetected = phones.length > 0
 
-            // ── Audio Analysis ────────────────────────────────────────────
-            let audioLevel = 0
-            let isLoud = false
-            if (analyser && dataArray) {
-              analyser.getByteFrequencyData(dataArray as any)
-              const sum = dataArray.reduce((a, b) => a + b, 0)
-              audioLevel = sum / dataArray.length
-              isLoud = audioLevel > AUDIO_THRESHOLD
-            }
-
             // ── Suspicious flags ──────────────────────────────────────────
             const suspicious: string[] = []
             if (!facePresence) suspicious.push('Face not detected')
@@ -257,7 +192,6 @@ export function useAIProctoring(
               suspicious.push(label)
             }
             if (deviceDetected) suspicious.push('Unauthorised device (phone) detected')
-            if (isLoud) suspicious.push('Speaking aloud / loud noise detected')
 
             // ── Sustained-condition events ────────────────────────────────
             const realNow = Date.now()
@@ -266,7 +200,6 @@ export function useAIProctoring(
             recordSustainedCondition('outsideFocus', facePresence && !multiplePeople && !attentionFocused, 'Candidate moved outside the camera focus area', realNow)
             recordSustainedCondition('lookingAway', lookingAway, `Candidate looked away from the screen (gaze: ${direction})`, realNow)
             recordSustainedCondition('deviceDetected', deviceDetected, 'Unauthorised device (phone) detected in view', realNow)
-            recordSustainedCondition('speakingAloud', isLoud, 'Candidate speaking aloud or loud noise detected', realNow, AUDIO_GRACE_MS)
 
             onStatusRef.current({
               facesDetected,
@@ -280,8 +213,8 @@ export function useAIProctoring(
               lookingAway,
               gazeDirection: facePresence ? direction : 'unknown',
               deviceDetected,
-              speakingAloud: isLoud,
-              audioLevel,
+              speakingAloud: false,
+              audioLevel: 0,
             })
           } catch (error) {
             const message = error instanceof Error ? error.message : 'Analysis failed'
@@ -302,14 +235,6 @@ export function useAIProctoring(
     return () => {
       disposed = true
       if (animationFrame !== null) cancelAnimationFrame(animationFrame)
-      if (audioContext && audioContext.state !== 'closed') {
-        audioContext.close().catch(console.error)
-      }
-      if (recognition) {
-        try {
-          recognition.stop()
-        } catch {}
-      }
     }
   }, [active, videoElementRef])
 }

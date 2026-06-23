@@ -97,13 +97,22 @@ export function useProctoring(
     }
     document.addEventListener('contextmenu', handleContextMenu)
 
+    const handleBlur = () => {
+      fireLockout('Window focus lost (candidate clicked away or opened a screenshot utility)')
+    }
+    window.addEventListener('blur', handleBlur)
+
     const handleKeydown = (event: KeyboardEvent) => {
       const ctrl = event.ctrlKey || event.metaKey
       if (ctrl && event.key.toLowerCase() === 'c') fire('Copy shortcut detected')
       else if (ctrl && event.key.toLowerCase() === 'v') fire('Paste shortcut detected')
       else if (ctrl && event.key === 'Tab') fire('Ctrl+Tab (tab switch shortcut) detected')
-      else if (event.key === 'PrintScreen') fire('PrintScreen key pressed')
-      else if (event.altKey && event.key === 'Tab') fire('Alt+Tab (window switch shortcut) detected')
+      else if (event.key === 'PrintScreen') fireLockout('PrintScreen key pressed / screenshot attempted')
+      else if (ctrl && event.key.toLowerCase() === 'p') {
+        event.preventDefault()
+        fireLockout('Print command (Ctrl+P) shortcut detected')
+      }
+      else if (event.altKey && event.key === 'Tab') fireLockout('Alt+Tab (window switch shortcut) detected')
     }
     document.addEventListener('keydown', handleKeydown)
 
@@ -126,6 +135,7 @@ export function useProctoring(
       document.removeEventListener('cut', handleCut)
       document.removeEventListener('paste', handlePaste)
       document.removeEventListener('contextmenu', handleContextMenu)
+      window.removeEventListener('blur', handleBlur)
       document.removeEventListener('keydown', handleKeydown)
       window.removeEventListener('resize', handleResize)
     }
