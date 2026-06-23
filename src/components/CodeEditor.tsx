@@ -108,6 +108,10 @@ export function CodeEditor({ code, language, onChange, testCases, testId, questi
               fontSize: 14,
               padding: { top: 16 },
               scrollBeyondLastLine: false,
+              tabSize: 4,
+              insertSpaces: true,
+              autoIndent: 'full',
+              detectIndentation: true,
             }}
             loading={
               <div className="flex h-full items-center justify-center bg-slate-900">

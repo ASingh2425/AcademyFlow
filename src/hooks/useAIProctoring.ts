@@ -58,8 +58,6 @@ function estimateGaze(
     direction = 'left'
   } else if (yawAsymmetry > 0.70) {
     direction = 'right'
-  } else if (pitchRatio < 0.15) {
-    direction = 'up'
   }
 
   return { direction, yawAsymmetry, pitchRatio }
@@ -163,9 +161,9 @@ export function useAIProctoring(
             
             const attentionFocused =
               facePresence && !multiplePeople &&
-              centerX >= 0.2 && centerX <= 0.8 &&
-              centerY >= 0.15 && centerY <= 0.85 &&
-              faceArea >= 0.025
+              centerX >= 0.1 && centerX <= 0.9 &&
+              centerY >= 0.05 && centerY <= 0.95 &&
+              faceArea >= 0.01
 
             const { direction } = estimateGaze(primaryFace?.keypoints as Array<{ x: number; y: number }> | undefined)
             const lookingAway = facePresence && !multiplePeople && direction !== 'center' && direction !== 'unknown'
@@ -187,7 +185,6 @@ export function useAIProctoring(
               const label =
                 direction === 'left'  ? 'Looking LEFT (away from screen)' :
                 direction === 'right' ? 'Looking RIGHT (away from screen)' :
-                direction === 'up'    ? 'Looking UP (away from screen)' :
                                         'Looking away from screen'
               suspicious.push(label)
             }

@@ -57,10 +57,10 @@ export function useProctoring(
       )
 
       if (reportChanges && [...knownVideoInputs].some((id) => !videoInputs.has(id))) {
-        fireLockout('Camera disconnected during exam')
+        fire('Camera disconnected during exam')
       }
       if (reportChanges && [...knownAudioInputs].some((id) => !audioInputs.has(id))) {
-        fireLockout('Microphone disconnected during exam')
+        fire('Microphone disconnected during exam')
       }
       knownVideoInputs = videoInputs
       knownAudioInputs = audioInputs
@@ -72,7 +72,7 @@ export function useProctoring(
     navigator.mediaDevices?.addEventListener('devicechange', handleDeviceChange)
 
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') fireLockout('Exam tab hidden or switched')
+      if (document.visibilityState === 'hidden') fire('Exam tab hidden or switched')
     }
     document.addEventListener('visibilitychange', handleVisibilityChange)
 
@@ -98,7 +98,7 @@ export function useProctoring(
     document.addEventListener('contextmenu', handleContextMenu)
 
     const handleBlur = () => {
-      fireLockout('Window focus lost (candidate clicked away or opened a screenshot utility)')
+      fire('Window focus lost (candidate clicked away or opened a screenshot utility)')
     }
     window.addEventListener('blur', handleBlur)
 
@@ -107,12 +107,12 @@ export function useProctoring(
       if (ctrl && event.key.toLowerCase() === 'c') fire('Copy shortcut detected')
       else if (ctrl && event.key.toLowerCase() === 'v') fire('Paste shortcut detected')
       else if (ctrl && event.key === 'Tab') fire('Ctrl+Tab (tab switch shortcut) detected')
-      else if (event.key === 'PrintScreen') fireLockout('PrintScreen key pressed / screenshot attempted')
+      else if (event.key === 'PrintScreen') fire('PrintScreen key pressed / screenshot attempted')
       else if (ctrl && event.key.toLowerCase() === 'p') {
         event.preventDefault()
-        fireLockout('Print command (Ctrl+P) shortcut detected')
+        fire('Print command (Ctrl+P) shortcut detected')
       }
-      else if (event.altKey && event.key === 'Tab') fireLockout('Alt+Tab (window switch shortcut) detected')
+      else if (event.altKey && event.key === 'Tab') fire('Alt+Tab (window switch shortcut) detected')
     }
     document.addEventListener('keydown', handleKeydown)
 
