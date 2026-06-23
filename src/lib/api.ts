@@ -149,4 +149,9 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  executeCode: (language: string, code: string, stdin: string) =>
+    request<{ run?: { stdout: string; output: string }; message?: string; error?: string }>('/execute', {
+      method: 'POST',
+      body: JSON.stringify({ language, code, stdin }),
+    }),
 }

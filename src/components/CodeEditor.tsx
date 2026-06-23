@@ -1,6 +1,7 @@
 import Editor, { loader } from '@monaco-editor/react'
 import { useState, useEffect } from 'react'
 import { Loader2, Play, CheckCircle2, XCircle } from 'lucide-react'
+import { api } from '../lib/api'
 
 // Configure Monaco Loader to use jsdelivr CDN
 loader.config({
@@ -43,22 +44,14 @@ export function CodeEditor({ code, language, onChange, testCases }: CodeEditorPr
     
     for (const tc of publicTestCases) {
       try {
-        const res = await fetch('https://emkc.org/api/v2/piston/execute', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            language,
-            version: '*',
-            files: [{ content: code }],
-            stdin: tc.input,
-          }),
-        })
-        const out = await res.json()
-        const output = (out.run?.stdout || out.run?.output || '').trim()
+        const out = await api.executeCode(language, code, tc.input)
+        const output = out.run
+          ? (out.run.stdout || out.run.output || '').trim()
+          : (out.message || out.error || 'Execution failed. No runtime response received.').trim()
         const passed = output === tc.expectedOutput.trim()
         newResults.push({ passed, output: output || '<no output>' })
       } catch (err) {
-        newResults.push({ passed: false, output: 'Execution failed or timed out.' })
+        newResults.push({ passed: false, output: err instanceof Error ? err.message : 'Execution failed or timed out.' })
       }
     }
     

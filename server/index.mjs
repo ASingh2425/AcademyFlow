@@ -157,6 +157,17 @@ app.post('/api/admin/logout', (_req, res) => {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+function getFilename(lang) {
+  const l = String(lang || '').toLowerCase()
+  if (l.includes('python')) return 'main.py'
+  if (l.includes('javascript') || l.includes('js')) return 'main.js'
+  if (l.includes('typescript') || l.includes('ts')) return 'main.ts'
+  if (l.includes('c++') || l.includes('cpp')) return 'main.cpp'
+  if (l.includes('java')) return 'Main.java'
+  if (l.includes('c')) return 'main.c'
+  return 'main'
+}
+
 function generateCode() {
   return String(randomInt(100000, 1000000))
 }
@@ -425,6 +436,35 @@ app.patch('/api/attempts/:id', requireStudent, serializeMutation(async (req, res
   res.json(attempt)
 }))
 
+app.post('/api/execute', requireStudent, async (req, res) => {
+  const { language, code, stdin } = req.body
+  if (!language || !code) {
+    return res.status(400).json({ error: 'Language and code are required.' })
+  }
+  const pistonUrl = process.env.PISTON_URL || 'https://emkc.org/api/v2/piston/execute'
+  const pistonKey = process.env.PISTON_API_KEY
+  try {
+    const headers = { 'Content-Type': 'application/json' }
+    if (pistonKey) {
+      headers['Authorization'] = pistonKey
+    }
+    const response = await fetch(pistonUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        language,
+        version: '*',
+        files: [{ name: getFilename(language), content: code }],
+        stdin: stdin || '',
+      }),
+    })
+    const data = await response.json()
+    res.json(data)
+  } catch (error) {
+    res.status(500).json({ error: 'Code execution failed: ' + error.message })
+  }
+})
+
 // ─── Submissions ──────────────────────────────────────────────────────────────
 
 app.get('/api/submissions', requireAdmin, async (req, res) => {
@@ -486,13 +526,19 @@ app.post('/api/submissions', requireStudent, serializeMutation(async (req, res) 
           const results = await Promise.all(
             question.testCases.map(async (tc) => {
               try {
-                const res = await fetch('https://emkc.org/api/v2/piston/execute', {
+                const pistonUrl = process.env.PISTON_URL || 'https://emkc.org/api/v2/piston/execute'
+                const pistonKey = process.env.PISTON_API_KEY
+                const headers = { 'Content-Type': 'application/json' }
+                if (pistonKey) {
+                  headers['Authorization'] = pistonKey
+                }
+                const res = await fetch(pistonUrl, {
                   method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
+                  headers,
                   body: JSON.stringify({
                     language: answer.language,
                     version: '*',
-                    files: [{ content: answer.code }],
+                    files: [{ name: getFilename(answer.language), content: answer.code }],
                     stdin: tc.input,
                   }),
                 })
