@@ -41,7 +41,7 @@ export function QuestionReview({ questions, answers }: QuestionReviewProps) {
               ) : (
                 <XCircle className="h-5 w-5 shrink-0 text-red-400" />
               )}
-              <span className="flex-1 text-sm font-medium text-slate-800 dark:text-slate-200">
+              <span className="flex-1 text-sm font-medium text-slate-800 dark:text-slate-200 whitespace-pre-wrap">
                 Q{idx + 1}. {q.text}
               </span>
               <ChevronDown

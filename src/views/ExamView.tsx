@@ -289,7 +289,7 @@ export function ExamView({ test, session, onUpdateSession, onSubmit }: ExamViewP
             </button>
           </div>
 
-          <h3 className="mt-4 text-xl font-semibold leading-relaxed text-slate-900 dark:text-white sm:text-2xl">
+          <h3 className="mt-4 text-xl font-semibold leading-relaxed text-slate-900 dark:text-white sm:text-2xl whitespace-pre-wrap">
             {currentQ.text}
           </h3>
           {currentQ.marks && currentQ.marks > 1 && (
