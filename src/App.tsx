@@ -276,7 +276,12 @@ function StudentApp() {
           <ResultsView
             submission={activeSubmission}
             test={activeTest}
-            onDone={() => navigate(`/test/${testId}`)}
+            onDone={() => {
+              setActiveSubmission(null)
+              setActiveTest(null)
+              setPhase('gate')
+              navigate(`/test/${testId}`)
+            }}
           />
         )}
       </main>

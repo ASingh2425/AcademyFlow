@@ -84,7 +84,7 @@ export function useAIProctoring(
     const lastLoggedAt: Record<string, number> = {}
     
     // Config
-    const ANALYSIS_INTERVAL_MS = 250
+    const ANALYSIS_INTERVAL_MS = 750
     const CONDITION_GRACE_MS   = 1500
     const EVENT_COOLDOWN_MS    = 10_000
 
