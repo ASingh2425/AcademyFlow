@@ -77,6 +77,9 @@ export function MCQBuilder({ editingTest, onSave, onCancel }: MCQBuilderProps) {
   const [allowMultipleAttempts, setAllowMultipleAttempts] = useState(
     editingTest?.allowMultipleAttempts ?? false
   )
+  const [enableAIProctoring, setEnableAIProctoring] = useState(
+    editingTest?.enableAIProctoring !== false
+  )
   const [questions, setQuestions] = useState<BuilderQuestion[]>(
     editingTest
       ? editingTest.questions.map((q) => ({
@@ -206,6 +209,7 @@ export function MCQBuilder({ editingTest, onSave, onCancel }: MCQBuilderProps) {
       scheduledStart: new Date(scheduledStart).toISOString(),
       scheduledEnd: new Date(scheduledEnd).toISOString(),
       allowMultipleAttempts,
+      enableAIProctoring,
       questions: questions.map((q) => {
         if (q.type === 'mcq') {
           return {
@@ -357,8 +361,20 @@ export function MCQBuilder({ editingTest, onSave, onCancel }: MCQBuilderProps) {
             Allow multiple exam attempts per student
           </label>
         </div>
+        <div className="flex items-center gap-2 mt-2">
+          <input
+            id="enableAIProctoring"
+            type="checkbox"
+            checked={enableAIProctoring}
+            onChange={(e) => setEnableAIProctoring(e.target.checked)}
+            className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-800"
+          />
+          <label htmlFor="enableAIProctoring" className="text-sm font-medium text-slate-700 dark:text-slate-300 select-none">
+            Enable AI Proctoring (Webcam camera monitoring, gaze tracking, cell phone detection)
+          </label>
+        </div>
         <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-          Students can only start the test between these scheduled times. {allowMultipleAttempts ? 'Multiple attempts are permitted.' : 'Only one attempt is permitted.'}
+          Students can only start the test between these scheduled times. {allowMultipleAttempts ? 'Multiple attempts are permitted.' : 'Only one attempt is permitted.'} {enableAIProctoring ? 'Webcam monitoring & AI analysis is enabled.' : 'Camera monitoring is disabled; integrity tracks only tab shifts and copy-paste.'}
         </p>
       </div>
 

@@ -31,6 +31,7 @@ export interface Test {
   questions: Question[]
   passMark?: number
   allowMultipleAttempts?: boolean
+  enableAIProctoring?: boolean
 }
 
 export interface ProctorEvent {

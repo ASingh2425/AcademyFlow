@@ -191,7 +191,7 @@ export function ExamView({ test, session, onUpdateSession, onSubmit }: ExamViewP
 
   return (
     <div className="exam-mode animate-fade-in mx-auto flex max-w-7xl flex-col gap-4 px-4 py-6 lg:flex-row lg:px-6">
-      <AntiCameraOverlay email={session.candidateName} active={true} />
+      <AntiCameraOverlay email={session.candidateName} active={test.enableAIProctoring !== false} />
       
       {lockoutUntil && Date.now() < lockoutUntil ? (
         <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-slate-950/95 backdrop-blur-lg px-4 text-center">
@@ -379,18 +379,22 @@ export function ExamView({ test, session, onUpdateSession, onSubmit }: ExamViewP
       {/* Sidebar */}
       <aside className="w-full space-y-4 lg:w-72">
         {/* Camera Proctoring */}
-        <div className="rounded-xl border border-indigo-500 bg-gradient-to-br from-indigo-50/50 to-indigo-50/30 p-4 dark:border-indigo-400 dark:from-indigo-950/40 dark:to-indigo-950/20">
-          <CameraProctor active onVideoRef={handleVideoRef} onMediaEvent={handleMediaEvent} />
-        </div>
+        {test.enableAIProctoring !== false && (
+          <div className="rounded-xl border border-indigo-500 bg-gradient-to-br from-indigo-50/50 to-indigo-50/30 p-4 dark:border-indigo-400 dark:from-indigo-950/40 dark:to-indigo-950/20">
+            <CameraProctor active onVideoRef={handleVideoRef} onMediaEvent={handleMediaEvent} />
+          </div>
+        )}
 
         {/* AI Proctoring Monitor */}
-        <div className="rounded-xl border border-violet-500 bg-gradient-to-br from-violet-50/50 to-violet-50/30 p-4 dark:border-violet-400 dark:from-violet-950/40 dark:to-violet-950/20">
-          <AIProctorMonitor
-            videoRef={videoRef}
-            active={true}
-            onProctorEvent={addProctorEvent}
-          />
-        </div>
+        {test.enableAIProctoring !== false && (
+          <div className="rounded-xl border border-violet-500 bg-gradient-to-br from-violet-50/50 to-violet-50/30 p-4 dark:border-violet-400 dark:from-violet-950/40 dark:to-violet-950/20">
+            <AIProctorMonitor
+              videoRef={videoRef}
+              active={true}
+              onProctorEvent={addProctorEvent}
+            />
+          </div>
+        )}
 
         {/* Session integrity */}
         <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">

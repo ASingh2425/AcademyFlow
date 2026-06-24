@@ -327,6 +327,7 @@ function validatedTest(input) {
     throw new Error('Pass mark must be between 0 and 100 percent.')
   }
   const allowMultipleAttempts = Boolean(input.allowMultipleAttempts)
+  const enableAIProctoring = input.enableAIProctoring !== undefined ? Boolean(input.enableAIProctoring) : true
   return {
     id: sanitizeString(input.id, 100) || generateId('test'),
     title,
@@ -338,6 +339,7 @@ function validatedTest(input) {
     questions,
     passMark,
     allowMultipleAttempts,
+    enableAIProctoring,
   }
 }
 
