@@ -326,6 +326,7 @@ function validatedTest(input) {
   if (!Number.isFinite(passMark) || passMark < 0 || passMark > 100) {
     throw new Error('Pass mark must be between 0 and 100 percent.')
   }
+  const allowMultipleAttempts = Boolean(input.allowMultipleAttempts)
   return {
     id: sanitizeString(input.id, 100) || generateId('test'),
     title,
@@ -336,6 +337,7 @@ function validatedTest(input) {
     scheduledEnd: scheduledEnd.toISOString(),
     questions,
     passMark,
+    allowMultipleAttempts,
   }
 }
 
@@ -437,7 +439,7 @@ app.post('/api/attempts/start', requireStudent, serializeMutation(async (req, re
   if (now < new Date(test.scheduledStart) || now > new Date(test.scheduledEnd)) {
     return res.status(403).json({ error: 'This test is not currently within its scheduled window.' })
   }
-  if (data.submissions.some((item) => item.testId === test.id && item.studentId === req.studentId)) {
+  if (!test.allowMultipleAttempts && data.submissions.some((item) => item.testId === test.id && item.studentId === req.studentId)) {
     return res.status(409).json({ error: 'You have already attempted this test.' })
   }
   const existing = data.attempts.find(
@@ -662,7 +664,7 @@ app.post('/api/submissions', requireStudent, serializeMutation(async (req, res) 
   const existing = data.submissions.find(
     (s) => s.testId === testId && s.studentId === studentId
   )
-  if (existing) {
+  if (!test.allowMultipleAttempts && existing) {
     return res.status(409).json({ error: 'You have already attempted this test.' })
   }
 

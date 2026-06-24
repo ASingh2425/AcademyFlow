@@ -30,6 +30,7 @@ export interface Test {
   scheduledEnd: string
   questions: Question[]
   passMark?: number
+  allowMultipleAttempts?: boolean
 }
 
 export interface ProctorEvent {

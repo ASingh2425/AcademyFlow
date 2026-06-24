@@ -74,6 +74,9 @@ export function MCQBuilder({ editingTest, onSave, onCancel }: MCQBuilderProps) {
     toDatetimeLocal(editingTest?.scheduledEnd || defaultEndFromStart(toDatetimeLocal()))
   )
   const [code, setCode] = useState(editingTest?.code ?? '')
+  const [allowMultipleAttempts, setAllowMultipleAttempts] = useState(
+    editingTest?.allowMultipleAttempts ?? false
+  )
   const [questions, setQuestions] = useState<BuilderQuestion[]>(
     editingTest
       ? editingTest.questions.map((q) => ({
@@ -202,6 +205,7 @@ export function MCQBuilder({ editingTest, onSave, onCancel }: MCQBuilderProps) {
       passMark,
       scheduledStart: new Date(scheduledStart).toISOString(),
       scheduledEnd: new Date(scheduledEnd).toISOString(),
+      allowMultipleAttempts,
       questions: questions.map((q) => {
         if (q.type === 'mcq') {
           return {
@@ -341,8 +345,20 @@ export function MCQBuilder({ editingTest, onSave, onCancel }: MCQBuilderProps) {
             />
           </div>
         </div>
-        <p className="text-xs text-slate-500 dark:text-slate-400">
-          Students can only start the test between these times. One attempt per student is enforced.
+        <div className="flex items-center gap-2 mt-2">
+          <input
+            id="allowMultipleAttempts"
+            type="checkbox"
+            checked={allowMultipleAttempts}
+            onChange={(e) => setAllowMultipleAttempts(e.target.checked)}
+            className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-800"
+          />
+          <label htmlFor="allowMultipleAttempts" className="text-sm font-medium text-slate-700 dark:text-slate-300 select-none">
+            Allow multiple exam attempts per student
+          </label>
+        </div>
+        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+          Students can only start the test between these scheduled times. {allowMultipleAttempts ? 'Multiple attempts are permitted.' : 'Only one attempt is permitted.'}
         </p>
       </div>
 
