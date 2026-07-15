@@ -283,6 +283,7 @@ function validatedTest(input) {
     if (!Number.isFinite(marks) || marks < 1 || marks > 100) {
       throw new Error(`Question ${index + 1} marks must be between 1 and 100.`)
     }
+    const imageUrl = sanitizeString(question?.imageUrl, 2 * 1024 * 1024)
     
     if (type === 'mcq') {
       const options = Array.isArray(question?.options)
@@ -294,11 +295,16 @@ function validatedTest(input) {
       if (!Number.isInteger(question.correctIndex) || question.correctIndex < 0 || question.correctIndex > 3) {
         throw new Error(`Question ${index + 1} has an invalid correct answer.`)
       }
+      const optionImages = Array.isArray(question?.optionImages)
+        ? question.optionImages.map((img) => sanitizeString(img, 2 * 1024 * 1024))
+        : ['', '', '', '']
       return {
         id: sanitizeString(question.id, 100) || generateId('question'),
         type,
         text,
+        imageUrl,
         options,
+        optionImages,
         correctIndex: question.correctIndex,
         marks,
       }
@@ -315,6 +321,7 @@ function validatedTest(input) {
         id: sanitizeString(question.id, 100) || generateId('question'),
         type,
         text,
+        imageUrl,
         marks,
         allowedLanguages,
         starterCode,
