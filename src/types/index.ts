@@ -11,8 +11,10 @@ export interface Question {
   type?: QuestionType // Optional for backwards compatibility, defaults to 'mcq'
   text: string
   marks?: number
+  imageUrl?: string
   // MCQ
   options?: [string, string, string, string]
+  optionImages?: [string, string, string, string]
   correctIndex?: number
   // Coding
   allowedLanguages?: string[]
@@ -108,8 +110,10 @@ export interface BuilderQuestion {
   type: QuestionType
   text: string
   marks: number
+  imageUrl?: string
   // MCQ
   options?: [string, string, string, string]
+  optionImages?: [string, string, string, string]
   correctIndex?: number | null
   // Coding
   allowedLanguages?: string[]

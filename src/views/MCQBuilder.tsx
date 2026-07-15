@@ -9,7 +9,8 @@ import {
   Code2,
   List,
   Eye,
-  EyeOff
+  EyeOff,
+  Image as ImageIcon
 } from 'lucide-react'
 import { useState } from 'react'
 import type { BuilderQuestion, Test, QuestionType, TestCase } from '../types'
@@ -40,6 +41,7 @@ function emptyQuestion(type: QuestionType = 'mcq'): BuilderQuestion {
       id: generateId('bq'),
       type: 'coding',
       text: '',
+      imageUrl: '',
       marks: 10,
       allowedLanguages: ['python', 'javascript'],
       starterCode: { python: 'def solve():\n    pass', javascript: 'function solve() {\n\n}' },
@@ -50,10 +52,51 @@ function emptyQuestion(type: QuestionType = 'mcq'): BuilderQuestion {
     id: generateId('bq'),
     type: 'mcq',
     text: '',
+    imageUrl: '',
     options: ['', '', '', ''],
+    optionImages: ['', '', '', ''],
     correctIndex: null,
     marks: 1,
   }
+}
+
+function processImageFile(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      const tempImg = new Image()
+      tempImg.onload = () => {
+        const canvas = document.createElement('canvas')
+        const maxDim = 800
+        let w = tempImg.width
+        let h = tempImg.height
+        if (w > maxDim || h > maxDim) {
+          if (w > h) {
+            h = Math.round((h * maxDim) / w)
+            w = maxDim
+          } else {
+            w = Math.round((w * maxDim) / h)
+            h = maxDim
+          }
+        }
+        canvas.width = w
+        canvas.height = h
+        const ctx = canvas.getContext('2d')
+        if (ctx) {
+          ctx.drawImage(tempImg, 0, 0, w, h)
+          resolve(canvas.toDataURL('image/jpeg', 0.7))
+        } else {
+          resolve(e.target?.result as string)
+        }
+      }
+      tempImg.onerror = () => {
+        resolve(e.target?.result as string)
+      }
+      tempImg.src = e.target?.result as string
+    }
+    reader.onerror = (err) => reject(err)
+    reader.readAsDataURL(file)
+  })
 }
 
 interface MCQBuilderProps {
@@ -86,7 +129,9 @@ export function MCQBuilder({ editingTest, onSave, onCancel }: MCQBuilderProps) {
           id: q.id,
           type: q.type || 'mcq',
           text: q.text,
+          imageUrl: q.imageUrl,
           options: q.options ? [...q.options] as [string, string, string, string] : undefined,
+          optionImages: q.optionImages ? [...q.optionImages] as [string, string, string, string] : (q.type === 'mcq' ? ['', '', '', ''] : undefined),
           correctIndex: q.correctIndex,
           marks: q.marks ?? 1,
           allowedLanguages: q.allowedLanguages,
@@ -115,6 +160,48 @@ export function MCQBuilder({ editingTest, onSave, onCancel }: MCQBuilderProps) {
         return { ...q, options: opts }
       })
     )
+  }
+
+  const updateOptionImage = (qId: string, optIndex: number, value: string) => {
+    setQuestions((prev) =>
+      prev.map((q) => {
+        if (q.id !== qId) return q
+        const optImgs = [...(q.optionImages || ['', '', '', ''])] as [string, string, string, string]
+        optImgs[optIndex] = value
+        return { ...q, optionImages: optImgs }
+      })
+    )
+  }
+
+  const handlePaste = async (e: React.ClipboardEvent, onImageProcessed: (base64: string) => void) => {
+    const items = e.clipboardData?.items
+    if (!items) return
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf('image') !== -1) {
+        const file = items[i].getAsFile()
+        if (file) {
+          e.preventDefault()
+          try {
+            const base64 = await processImageFile(file)
+            onImageProcessed(base64)
+          } catch (err) {
+            console.error('Failed to process pasted image:', err)
+          }
+        }
+      }
+    }
+  }
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>, onImageProcessed: (base64: string) => void) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      try {
+        const base64 = await processImageFile(file)
+        onImageProcessed(base64)
+      } catch (err) {
+        console.error('Failed to process uploaded image:', err)
+      }
+    }
   }
 
   const moveQuestion = (index: number, direction: -1 | 1) => {
@@ -216,7 +303,9 @@ export function MCQBuilder({ editingTest, onSave, onCancel }: MCQBuilderProps) {
             id: q.id,
             type: 'mcq',
             text: q.text.trim(),
+            imageUrl: q.imageUrl,
             options: q.options?.map((o) => o.trim()) as [string, string, string, string],
+            optionImages: q.optionImages,
             correctIndex: q.correctIndex!,
             marks: q.marks ?? 1,
           }
@@ -225,6 +314,7 @@ export function MCQBuilder({ editingTest, onSave, onCancel }: MCQBuilderProps) {
           id: q.id,
           type: 'coding',
           text: q.text.trim(),
+          imageUrl: q.imageUrl,
           marks: q.marks ?? 10,
           allowedLanguages: q.allowedLanguages || ['python', 'javascript'],
           starterCode: q.starterCode || {},
@@ -482,34 +572,88 @@ export function MCQBuilder({ editingTest, onSave, onCancel }: MCQBuilderProps) {
               <textarea
                 value={q.text}
                 onChange={(e) => updateQuestion(q.id, { text: e.target.value })}
+                onPaste={(e) => handlePaste(e, (base64) => updateQuestion(q.id, { imageUrl: base64 }))}
                 rows={q.type === 'coding' ? 4 : 2}
                 placeholder={q.type === 'coding' ? "Describe the problem, input format, output format, and constraints..." : "Write the question..."}
                 className="w-full rounded-lg border border-slate-300 px-4 py-2.5 outline-none focus:ring-2 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-800 dark:text-white font-mono text-sm"
               />
+              <div className="mt-2 flex flex-wrap items-center gap-3">
+                <label className="flex cursor-pointer items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700/80">
+                  <ImageIcon className="h-3.5 w-3.5" />
+                  <span>Attach Image</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => handleFileChange(e, (base64) => updateQuestion(q.id, { imageUrl: base64 }))}
+                  />
+                </label>
+                <span className="text-[10px] text-slate-400">Or paste image directly into textbox</span>
+              </div>
+              {q.imageUrl && (
+                <div className="relative mt-2 inline-block rounded-lg border border-slate-200 dark:border-slate-700 p-1 bg-slate-50 dark:bg-slate-800">
+                  <img src={q.imageUrl} alt="Preview" className="max-h-24 max-w-[200px] object-contain rounded" />
+                  <button
+                    type="button"
+                    onClick={() => updateQuestion(q.id, { imageUrl: '' })}
+                    className="absolute -top-1.5 -right-1.5 rounded-full bg-red-500 p-1 text-white hover:bg-red-600 transition-colors shadow-sm"
+                    title="Remove image"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </div>
+              )}
             </div>
 
             {q.type === 'mcq' ? (
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
                   Options & Correct Answer Key
                 </p>
                 {(q.options || ['', '', '', '']).map((opt, oi) => (
-                  <div key={oi} className="flex items-center gap-3">
-                    <input
-                      type="radio"
-                      name={`correct-${q.id}`}
-                      checked={q.correctIndex === oi}
-                      onChange={() => updateQuestion(q.id, { correctIndex: oi })}
-                      className="h-4 w-4 accent-indigo-500"
-                    />
-                    <span className="w-6 font-mono text-sm font-bold text-slate-500">{LABELS[oi]}</span>
-                    <input
-                      type="text"
-                      value={opt}
-                      onChange={(e) => updateOption(q.id, oi, e.target.value)}
-                      placeholder={`Option ${LABELS[oi]}`}
-                      className="flex-1 rounded-lg border border-slate-300 px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-800 dark:text-white"
-                    />
+                  <div key={oi} className="flex flex-col gap-2">
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="radio"
+                        name={`correct-${q.id}`}
+                        checked={q.correctIndex === oi}
+                        onChange={() => updateQuestion(q.id, { correctIndex: oi })}
+                        className="h-4 w-4 accent-indigo-500 shrink-0"
+                      />
+                      <span className="w-6 font-mono text-sm font-bold text-slate-500 shrink-0">{LABELS[oi]}</span>
+                      <div className="relative flex flex-1 items-center">
+                        <input
+                          type="text"
+                          value={opt}
+                          onChange={(e) => updateOption(q.id, oi, e.target.value)}
+                          onPaste={(e) => handlePaste(e, (base64) => updateOptionImage(q.id, oi, base64))}
+                          placeholder={`Option ${LABELS[oi]} (type or paste image)`}
+                          className="w-full rounded-lg border border-slate-300 pl-3 pr-10 py-2 outline-none focus:ring-2 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-800 dark:text-white"
+                        />
+                        <label className="absolute right-2.5 cursor-pointer text-slate-400 hover:text-indigo-500 transition-colors">
+                          <ImageIcon className="h-4 w-4" />
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => handleFileChange(e, (base64) => updateOptionImage(q.id, oi, base64))}
+                          />
+                        </label>
+                      </div>
+                    </div>
+                    {q.optionImages?.[oi] && (
+                      <div className="relative ml-13 self-start rounded-lg border border-slate-200 dark:border-slate-700 p-1 bg-slate-50 dark:bg-slate-800">
+                        <img src={q.optionImages[oi]} alt={`Option ${LABELS[oi]} Preview`} className="max-h-16 max-w-[150px] object-contain rounded" />
+                        <button
+                          type="button"
+                          onClick={() => updateOptionImage(q.id, oi, '')}
+                          className="absolute -top-1.5 -right-1.5 rounded-full bg-red-500 p-1 text-white hover:bg-red-600 transition-colors shadow-sm"
+                          title="Remove option image"
+                        >
+                          <Trash2 className="h-2.5 w-2.5" />
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

@@ -292,6 +292,11 @@ export function ExamView({ test, session, onUpdateSession, onSubmit }: ExamViewP
           <h3 className="mt-4 text-xl font-semibold leading-relaxed text-slate-900 dark:text-white sm:text-2xl whitespace-pre-wrap">
             {currentQ.text}
           </h3>
+          {currentQ.imageUrl && (
+            <div className="mt-4 overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2">
+              <img src={currentQ.imageUrl} alt="Question Graphic" className="max-h-[350px] max-w-full object-contain mx-auto" />
+            </div>
+          )}
           {currentQ.marks && currentQ.marks > 1 && (
             <p className="mt-1 text-xs text-indigo-500">
               [{currentQ.marks} marks]
@@ -336,7 +341,14 @@ export function ExamView({ test, session, onUpdateSession, onSubmit }: ExamViewP
                     >
                       {LABELS[i]}
                     </span>
-                    <span className="pt-1 text-slate-800 dark:text-slate-200">{opt}</span>
+                    <div className="flex-1 flex flex-col gap-2 pt-1">
+                      <span className="text-slate-800 dark:text-slate-200">{opt}</span>
+                      {currentQ.optionImages?.[i] && (
+                        <div className="mt-2 self-start overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-1">
+                          <img src={currentQ.optionImages[i]} alt={`Option ${LABELS[i]} Graphic`} className="max-h-48 max-w-full object-contain" />
+                        </div>
+                      )}
+                    </div>
                   </button>
                 )
               })}
